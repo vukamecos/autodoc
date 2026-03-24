@@ -14,6 +14,7 @@ import (
 
 	"github.com/vukamecos/autodoc/internal/config"
 	"github.com/vukamecos/autodoc/internal/domain"
+	"github.com/vukamecos/autodoc/internal/retry"
 )
 
 const (
@@ -24,13 +25,14 @@ const (
 // Adapter implements domain.RepositoryPort and domain.MRCreatorPort via the GitLab REST API.
 // No local clone is needed: all operations are performed through the API.
 type Adapter struct {
-	http      *http.Client
-	baseURL   string // https://gitlab.example.com/api/v4
-	projectID string // URL-path-encoded, e.g. "group%2Frepo"
-	branch    string
-	token     string
-	gitCfg    config.GitConfig
-	log       *slog.Logger
+	http       *http.Client
+	baseURL    string // https://gitlab.example.com/api/v4
+	projectID  string // URL-path-encoded, e.g. "group%2Frepo"
+	branch     string
+	token      string
+	retryOpts  retry.Options
+	gitCfg     config.GitConfig
+	log        *slog.Logger
 }
 
 // New constructs a GitLab Adapter.
@@ -41,6 +43,7 @@ func New(cfg config.RepositoryConfig, gitCfg config.GitConfig, log *slog.Logger)
 		projectID: url.PathEscape(cfg.ProjectID),
 		branch:    cfg.DefaultBranch,
 		token:     cfg.Token,
+		retryOpts: retry.Options{MaxRetries: cfg.MaxRetries, RetryDelay: cfg.RetryDelay},
 		gitCfg:    gitCfg,
 		log:       log,
 	}
@@ -202,11 +205,11 @@ func (a *Adapter) CreateMR(ctx context.Context, mr domain.MergeRequest) (string,
 // OpenBotMRs returns all open MRs that carry the bot label.
 func (a *Adapter) OpenBotMRs(ctx context.Context) ([]domain.MergeRequest, error) {
 	var page []struct {
-		IID         int    `json:"iid"`
-		Title       string `json:"title"`
-		Description string `json:"description"`
+		IID          int    `json:"iid"`
+		Title        string `json:"title"`
+		Description  string `json:"description"`
 		SourceBranch string `json:"source_branch"`
-		WebURL      string `json:"web_url"`
+		WebURL       string `json:"web_url"`
 	}
 
 	q := url.Values{
@@ -240,11 +243,15 @@ func (a *Adapter) get(ctx context.Context, path string, query url.Values, out an
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return err
+	makeReq := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("PRIVATE-TOKEN", a.token)
+		return req, nil
 	}
-	return a.do(req, out)
+	return a.do(ctx, makeReq, out)
 }
 
 func (a *Adapter) post(ctx context.Context, path string, body, out any) error {
@@ -252,27 +259,28 @@ func (a *Adapter) post(ctx context.Context, path string, body, out any) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+path, bytes.NewReader(data))
-	if err != nil {
-		return err
+	makeReq := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+path, bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("PRIVATE-TOKEN", a.token)
+		return req, nil
 	}
-	req.Header.Set("Content-Type", "application/json")
-	return a.do(req, out)
+	return a.do(ctx, makeReq, out)
 }
 
-func (a *Adapter) do(req *http.Request, out any) error {
-	req.Header.Set("PRIVATE-TOKEN", a.token)
-
-	resp, err := a.http.Do(req)
+func (a *Adapter) do(ctx context.Context, makeReq func() (*http.Request, error), out any) error {
+	resp, err := retry.Do(ctx, a.http, a.retryOpts, makeReq)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("gitlab api %s %s: status %d: %s",
-			req.Method, req.URL.Path, resp.StatusCode, body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("gitlab api: status %d: %s", resp.StatusCode, b)
 	}
 	if out == nil {
 		return nil

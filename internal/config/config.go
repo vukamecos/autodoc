@@ -23,12 +23,14 @@ type SchedulerConfig struct {
 }
 
 type RepositoryConfig struct {
-	Provider          string   `yaml:"provider"`
-	URL               string   `yaml:"url"`
-	Token             string   `yaml:"token"`
-	DefaultBranch     string   `yaml:"default_branch"`
-	ProtectedBranches []string `yaml:"protected_branches"`
-	ProjectID         string   `yaml:"project_id"`
+	Provider          string        `yaml:"provider"`
+	URL               string        `yaml:"url"`
+	Token             string        `yaml:"token"`
+	DefaultBranch     string        `yaml:"default_branch"`
+	ProtectedBranches []string      `yaml:"protected_branches"`
+	ProjectID         string        `yaml:"project_id"`
+	MaxRetries        int           `yaml:"max_retries"`
+	RetryDelay        time.Duration `yaml:"retry_delay"`
 }
 
 type DocumentationConfig struct {
@@ -117,4 +119,6 @@ func applyDefaults(cfg *Config) {
 	cfg.ACP.MaxRetries = 3
 	cfg.ACP.RetryDelay = time.Second
 	cfg.Repository.DefaultBranch = "main"
+	cfg.Repository.MaxRetries = 3
+	cfg.Repository.RetryDelay = time.Second
 }

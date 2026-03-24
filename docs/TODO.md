@@ -585,7 +585,7 @@ In MVP: choose one policy (update existing MR or skip) and fix it in config.
 
 ## Stage 6: Production hardening
 
-- [ ] Implement retries for transport-level errors
+- [x] Implement retries for transport-level errors
 - [ ] Implement deduplication by input context hash
 - [x] Add metrics: `runs_total`, `runs_failed`, `docs_updated_total`, `mr_created_total`, `acp_requests_total`, `acp_request_duration`
 - [ ] Add optional pprof endpoint

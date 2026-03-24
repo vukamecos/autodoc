@@ -14,6 +14,7 @@ import (
 
 	"github.com/vukamecos/autodoc/internal/config"
 	"github.com/vukamecos/autodoc/internal/domain"
+	"github.com/vukamecos/autodoc/internal/retry"
 )
 
 const (
@@ -27,14 +28,15 @@ const (
 // Adapter implements domain.RepositoryPort and domain.MRCreatorPort via the GitHub REST API.
 // All operations are performed through the API — no local clone required.
 type Adapter struct {
-	http   *http.Client
-	base   string // https://api.github.com
-	owner  string
-	repo   string
-	branch string
-	token  string
-	gitCfg config.GitConfig
-	log    *slog.Logger
+	http      *http.Client
+	base      string // https://api.github.com
+	owner     string
+	repo      string
+	branch    string
+	token     string
+	retryOpts retry.Options
+	gitCfg    config.GitConfig
+	log       *slog.Logger
 }
 
 // New constructs a GitHub Adapter.
@@ -47,14 +49,15 @@ func New(cfg config.RepositoryConfig, gitCfg config.GitConfig, log *slog.Logger)
 		base = strings.TrimRight(cfg.URL, "/")
 	}
 	return &Adapter{
-		http:   &http.Client{Timeout: defaultTimeout},
-		base:   base,
-		owner:  owner,
-		repo:   repo,
-		branch: cfg.DefaultBranch,
-		token:  cfg.Token,
-		gitCfg: gitCfg,
-		log:    log,
+		http:      &http.Client{Timeout: defaultTimeout},
+		base:      base,
+		owner:     owner,
+		repo:      repo,
+		branch:    cfg.DefaultBranch,
+		token:     cfg.Token,
+		retryOpts: retry.Options{MaxRetries: cfg.MaxRetries, RetryDelay: cfg.RetryDelay},
+		gitCfg:    gitCfg,
+		log:       log,
 	}
 }
 
@@ -240,7 +243,7 @@ func (a *Adapter) CreateMR(ctx context.Context, mr domain.MergeRequest) (string,
 	}
 
 	var resp struct {
-		Number int    `json:"number"`
+		Number  int    `json:"number"`
 		HTMLURL string `json:"html_url"`
 	}
 	path := fmt.Sprintf("/repos/%s/%s/pulls", a.owner, a.repo)
@@ -306,11 +309,15 @@ func (a *Adapter) get(ctx context.Context, path string, query url.Values, out an
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return err
+	makeReq := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
+		}
+		a.setHeaders(req)
+		return req, nil
 	}
-	return a.do(req, out)
+	return a.do(ctx, makeReq, out)
 }
 
 func (a *Adapter) post(ctx context.Context, path string, body, out any) error {
@@ -326,34 +333,40 @@ func (a *Adapter) sendJSON(ctx context.Context, method, path string, body, out a
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, a.base+path, bytes.NewReader(data))
-	if err != nil {
-		return err
+	makeReq := func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, method, a.base+path, bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		a.setHeaders(req)
+		return req, nil
 	}
-	req.Header.Set("Content-Type", "application/json")
-	return a.do(req, out)
+	return a.do(ctx, makeReq, out)
 }
 
-func (a *Adapter) do(req *http.Request, out any) error {
-	req.Header.Set("Authorization", "Bearer "+a.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", ghAPIVersion)
-
-	resp, err := a.http.Do(req)
+func (a *Adapter) do(ctx context.Context, makeReq func() (*http.Request, error), out any) error {
+	resp, err := retry.Do(ctx, a.http, a.retryOpts, makeReq)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("github api %s %s: status %d: %s",
-			req.Method, req.URL.Path, resp.StatusCode, body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("github api: status %d: %s", resp.StatusCode, b)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// setHeaders applies authentication and API version headers to a request.
+func (a *Adapter) setHeaders(req *http.Request) {
+	req.Header.Set("Authorization", "Bearer "+a.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", ghAPIVersion)
 }
 
 // addLabel adds the bot label to a pull request (best-effort, errors are ignored).
