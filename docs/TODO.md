@@ -566,7 +566,7 @@ In MVP: choose one policy (update existing MR or skip) and fix it in config.
 - [x] Implement ACP client (timeout, correlation id)
 - [x] Implement retry on transport-level errors
 - [x] Implement Context Builder (compact and relevant context)
-- [ ] Implement chunking for large diffs
+- [x] Implement chunking for large diffs
 - [x] Implement structured JSON response parser
 - [x] Implement interaction metadata logging without secret leakage
 

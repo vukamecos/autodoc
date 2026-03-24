@@ -14,21 +14,24 @@ import (
 	"github.com/vukamecos/autodoc/internal/observability"
 )
 
+// Ensure chunker.go helpers are in the same package — no additional import needed.
+
 // RunDocUpdateUseCase orchestrates the full documentation update flow.
 type RunDocUpdateUseCase struct {
-	repo      domain.RepositoryPort
-	mrCreator domain.MRCreatorPort
-	state     domain.StateStorePort
-	docStore  domain.DocumentStorePort
-	docWriter domain.DocumentWriterPort
-	acp       domain.ACPClientPort
-	analyzer  domain.ChangeAnalyzerPort
-	mapper    domain.DocumentMapperPort
-	validator domain.ValidationPort
-	gitCfg    config.GitConfig
-	dryRun    bool
-	log       *slog.Logger
-	metrics   *observability.Metrics
+	repo            domain.RepositoryPort
+	mrCreator       domain.MRCreatorPort
+	state           domain.StateStorePort
+	docStore        domain.DocumentStorePort
+	docWriter       domain.DocumentWriterPort
+	acp             domain.ACPClientPort
+	analyzer        domain.ChangeAnalyzerPort
+	mapper          domain.DocumentMapperPort
+	validator       domain.ValidationPort
+	gitCfg          config.GitConfig
+	maxContextBytes int
+	dryRun          bool
+	log             *slog.Logger
+	metrics         *observability.Metrics
 }
 
 // New constructs a RunDocUpdateUseCase with all required dependencies.
@@ -43,24 +46,26 @@ func New(
 	mapper domain.DocumentMapperPort,
 	validator domain.ValidationPort,
 	gitCfg config.GitConfig,
+	maxContextBytes int,
 	dryRun bool,
 	log *slog.Logger,
 	metrics *observability.Metrics,
 ) *RunDocUpdateUseCase {
 	return &RunDocUpdateUseCase{
-		repo:      repo,
-		mrCreator: mrCreator,
-		state:     state,
-		docStore:  docStore,
-		docWriter: docWriter,
-		acp:       acp,
-		analyzer:  analyzer,
-		mapper:    mapper,
-		validator: validator,
-		gitCfg:    gitCfg,
-		dryRun:    dryRun,
-		log:       log,
-		metrics:   metrics,
+		repo:            repo,
+		mrCreator:       mrCreator,
+		state:           state,
+		docStore:        docStore,
+		docWriter:       docWriter,
+		acp:             acp,
+		analyzer:        analyzer,
+		mapper:          mapper,
+		validator:       validator,
+		gitCfg:          gitCfg,
+		maxContextBytes: maxContextBytes,
+		dryRun:          dryRun,
+		log:             log,
+		metrics:         metrics,
 	}
 }
 
@@ -157,10 +162,8 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 			return fmt.Errorf("run: read document %q: %w", docPath, err)
 		}
 
-		acpReq := buildACPRequest(changes, *current)
-		uc.log.InfoContext(ctx, "run: calling ACP", "doc", docPath, "correlation_id", acpReq.CorrelationID)
-
-		acpResp, err := uc.acp.Generate(ctx, acpReq)
+		uc.log.InfoContext(ctx, "run: calling ACP", "doc", docPath)
+		acpResp, err := uc.generateWithChunking(ctx, changes, *current)
 		if err != nil {
 			return fmt.Errorf("run: acp generate for %q: %w", docPath, err)
 		}
@@ -248,23 +251,6 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	}
 
 	return nil
-}
-
-// buildACPRequest constructs an ACPRequest for a given document and set of changes.
-func buildACPRequest(changes []domain.AnalyzedChange, current domain.Document) domain.ACPRequest {
-	var diffBuilder strings.Builder
-	for _, c := range changes {
-		diffBuilder.WriteString(c.Diff.Patch)
-		diffBuilder.WriteString("\n")
-	}
-
-	return domain.ACPRequest{
-		CorrelationID: fmt.Sprintf("autodoc-%d", time.Now().UnixNano()),
-		Instructions:  "Update the documentation based on the provided code diff. Preserve existing style and structure.",
-		ChangeSummary: fmt.Sprintf("%d files changed", len(changes)),
-		Diff:          diffBuilder.String(),
-		Documents:     []domain.Document{current},
-	}
 }
 
 // buildMRDescription creates a human-readable MR description.
