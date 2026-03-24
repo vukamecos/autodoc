@@ -591,7 +591,7 @@ In MVP: choose one policy (update existing MR or skip) and fix it in config.
 - [x] Add optional pprof endpoint
 - [x] Write unit tests for core logic
 - [x] Write integration tests for GitLab adapter and state store
-- [ ] Add README with setup and configuration instructions
+- [x] Add README with setup and configuration instructions
 
 ## Acceptance Criteria
 
