@@ -66,9 +66,13 @@ type GitConfig struct {
 }
 
 type ValidationConfig struct {
-	MarkdownLint        bool `yaml:"markdown_lint"`
-	ForbidNonDocChanges bool `yaml:"forbid_non_doc_changes"`
-	MaxChangedFiles     int  `yaml:"max_changed_files"`
+	MarkdownLint        bool    `yaml:"markdown_lint"`
+	ForbidNonDocChanges bool    `yaml:"forbid_non_doc_changes"`
+	MaxChangedFiles     int     `yaml:"max_changed_files"`
+	// MinContentRatio is the minimum allowed ratio of updated/original content
+	// length. Prevents ACP from accidentally deleting most of a document.
+	// 0 disables the check. Default: 0.2 (document must keep ≥20% of original size).
+	MinContentRatio     float64 `yaml:"min_content_ratio"`
 }
 
 type StorageConfig struct {
@@ -107,6 +111,7 @@ func applyDefaults(cfg *Config) {
 	cfg.Git.BranchPrefix = "bot/docs-update/"
 	cfg.Git.CommitMessageTemplate = "docs: update documentation for recent repository changes"
 	cfg.Storage.DSN = "autodoc.db"
+	cfg.Validation.MinContentRatio = 0.2
 	cfg.ACP.Timeout = 120 * time.Second
 	cfg.ACP.MaxContextBytes = 500000
 	cfg.ACP.MaxRetries = 3

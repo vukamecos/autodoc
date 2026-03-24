@@ -575,13 +575,13 @@ In MVP: choose one policy (update existing MR or skip) and fix it in config.
 - [x] Implement Documentation Writer (atomic file write)
 - [x] Implement section-aware patching (preferred mode)
 - [x] Implement patch section / append new section modes
-- [ ] Implement Validation Layer:
-  - [ ] markdown lint / format
+- [x] Implement Validation Layer:
+  - [x] markdown lint / format
   - [x] allowed paths check
   - [x] document has not become empty
   - [x] required sections are present
   - [x] no changes outside docs/README
-  - [ ] diff size within limit
+  - [x] diff size within limit (MinContentRatio)
 
 ## Stage 6: Production hardening
 
