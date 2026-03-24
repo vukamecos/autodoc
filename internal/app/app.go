@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -32,6 +33,7 @@ type App struct {
 	metrics   *observability.Metrics
 	log       *slog.Logger
 	httpSrv   *http.Server
+	pprofSrv  *http.Server // nil when pprof is disabled
 }
 
 // New constructs all adapters, the use case, and registers the cron job.
@@ -89,6 +91,11 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		Handler: mux,
 	}
 
+	var pprofSrv *http.Server
+	if cfg.Observability.PprofEnabled {
+		pprofSrv = newPprofServer(cfg.Observability.PprofAddr)
+	}
+
 	return &App{
 		cfg:       cfg,
 		scheduler: sched,
@@ -96,7 +103,24 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		metrics:   metrics,
 		log:       log,
 		httpSrv:   httpSrv,
+		pprofSrv:  pprofSrv,
 	}, nil
+}
+
+// newPprofServer creates an HTTP server exposing the standard pprof endpoints
+// on a dedicated address (default :6060). Using a separate server ensures
+// pprof is never accidentally reachable via the public metrics port.
+func newPprofServer(addr string) *http.Server {
+	if addr == "" {
+		addr = ":6060"
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	return &http.Server{Addr: addr, Handler: mux}
 }
 
 // Run starts the scheduler and HTTP server, blocking until ctx is cancelled.
@@ -110,6 +134,15 @@ func (a *App) Run(ctx context.Context) error {
 			a.log.Error("app: HTTP server error", "error", err)
 		}
 	}()
+
+	if a.pprofSrv != nil {
+		go func() {
+			a.log.InfoContext(ctx, "app: pprof server listening", "addr", a.pprofSrv.Addr)
+			if err := a.pprofSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				a.log.Error("app: pprof server error", "error", err)
+			}
+		}()
+	}
 
 	<-ctx.Done()
 	a.log.InfoContext(ctx, "app: context cancelled, shutting down")
@@ -142,6 +175,12 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 	if err := a.httpSrv.Shutdown(ctx); err != nil {
 		return fmt.Errorf("app: http shutdown: %w", err)
+	}
+
+	if a.pprofSrv != nil {
+		if err := a.pprofSrv.Shutdown(ctx); err != nil {
+			return fmt.Errorf("app: pprof shutdown: %w", err)
+		}
 	}
 
 	if err := a.store.Close(); err != nil {

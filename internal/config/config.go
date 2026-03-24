@@ -16,6 +16,7 @@ type Config struct {
 	Git           GitConfig           `yaml:"git"`
 	Validation    ValidationConfig    `yaml:"validation"`
 	Storage       StorageConfig       `yaml:"storage"`
+	Observability ObservabilityConfig `yaml:"observability"`
 }
 
 type SchedulerConfig struct {
@@ -79,6 +80,11 @@ type ValidationConfig struct {
 
 type StorageConfig struct {
 	DSN string `yaml:"dsn"`
+}
+
+type ObservabilityConfig struct {
+	PprofEnabled bool   `yaml:"pprof_enabled"`
+	PprofAddr    string `yaml:"pprof_addr"` // defaults to ":6060" when pprof is enabled
 }
 
 // Load reads a YAML config file at path and applies defaults and environment overrides.
