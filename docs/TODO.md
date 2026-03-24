@@ -546,12 +546,12 @@ In MVP: choose one policy (update existing MR or skip) and fix it in config.
 
 ## Stage 2b: Git integration (GitHub) — post-MVP
 
-- [ ] Implement GitHub adapter: fetch / project connectivity check
-- [ ] Implement diff retrieval between two SHAs
-- [ ] Implement branch creation
-- [ ] Implement commit and push
-- [ ] Implement PR creation with description
-- [ ] Implement open bot PR check (deduplication)
+- [x] Implement GitHub adapter: fetch / project connectivity check
+- [x] Implement diff retrieval between two SHAs
+- [x] Implement branch creation
+- [x] Implement commit and push (Git Data API: blob → tree → commit → ref)
+- [x] Implement PR creation with description
+- [x] Implement open bot PR check (deduplication by branch prefix)
 - [ ] Add `github` provider to config and wire in `app.go`
 
 ## Stage 3: Change analysis

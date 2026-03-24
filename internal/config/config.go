@@ -86,8 +86,11 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
-	// Tokens from environment
+	// Tokens from environment — provider-specific vars take precedence over the file value.
 	if tok := os.Getenv("AUTODOC_GITLAB_TOKEN"); tok != "" {
+		cfg.Repository.Token = tok
+	}
+	if tok := os.Getenv("AUTODOC_GITHUB_TOKEN"); tok != "" {
 		cfg.Repository.Token = tok
 	}
 	if tok := os.Getenv("AUTODOC_ACP_TOKEN"); tok != "" {
