@@ -573,8 +573,8 @@ In MVP: choose one policy (update existing MR or skip) and fix it in config.
 ## Stage 5: Documentation update
 
 - [x] Implement Documentation Writer (atomic file write)
-- [ ] Implement section-aware patching (preferred mode)
-- [ ] Implement patch section / append new section modes
+- [x] Implement section-aware patching (preferred mode)
+- [x] Implement patch section / append new section modes
 - [ ] Implement Validation Layer:
   - [ ] markdown lint / format
   - [x] allowed paths check

@@ -11,10 +11,9 @@ import (
 
 	"github.com/vukamecos/autodoc/internal/config"
 	"github.com/vukamecos/autodoc/internal/domain"
+	"github.com/vukamecos/autodoc/internal/markdown"
 	"github.com/vukamecos/autodoc/internal/observability"
 )
-
-// Ensure chunker.go helpers are in the same package — no additional import needed.
 
 // RunDocUpdateUseCase orchestrates the full documentation update flow.
 type RunDocUpdateUseCase struct {
@@ -172,7 +171,16 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 			if acpFile.Path != docPath {
 				continue
 			}
-			updated := domain.Document{Path: acpFile.Path, Content: acpFile.Content}
+
+			// Section-aware patch: only replace changed sections instead of the
+			// whole file. For new files (action == "create") use full content.
+			content := acpFile.Content
+			if acpFile.Action != "create" && current.Content != "" {
+				content = markdown.PatchDocument(current.Content, acpFile.Content)
+				uc.log.InfoContext(ctx, "run: applied section-aware patch", slog.String("doc", docPath))
+			}
+
+			updated := domain.Document{Path: acpFile.Path, Content: content}
 
 			if err := uc.validator.Validate(ctx, *current, updated); err != nil {
 				uc.log.WarnContext(ctx, "run: validation failed, skipping doc", "doc", docPath, "error", err)
