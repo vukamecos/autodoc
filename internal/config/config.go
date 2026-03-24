@@ -56,6 +56,8 @@ type ACPConfig struct {
 	Timeout         time.Duration `yaml:"timeout"`
 	MaxContextBytes int           `yaml:"max_context_bytes"`
 	Mode            string        `yaml:"mode"`
+	MaxRetries      int           `yaml:"max_retries"`
+	RetryDelay      time.Duration `yaml:"retry_delay"`
 }
 
 type GitConfig struct {
@@ -107,5 +109,7 @@ func applyDefaults(cfg *Config) {
 	cfg.Storage.DSN = "autodoc.db"
 	cfg.ACP.Timeout = 120 * time.Second
 	cfg.ACP.MaxContextBytes = 500000
+	cfg.ACP.MaxRetries = 3
+	cfg.ACP.RetryDelay = time.Second
 	cfg.Repository.DefaultBranch = "main"
 }

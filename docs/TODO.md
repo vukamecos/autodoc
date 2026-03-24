@@ -564,7 +564,7 @@ In MVP: choose one policy (update existing MR or skip) and fix it in config.
 ## Stage 4: ACP integration
 
 - [x] Implement ACP client (timeout, correlation id)
-- [ ] Implement retry on transport-level errors
+- [x] Implement retry on transport-level errors
 - [x] Implement Context Builder (compact and relevant context)
 - [ ] Implement chunking for large diffs
 - [x] Implement structured JSON response parser
