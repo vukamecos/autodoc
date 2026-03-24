@@ -599,9 +599,9 @@ In MVP: choose one policy (update existing MR or skip) and fix it in config.
 - [x] Code/config changes are mapped to related docs
 - [ ] ACP generates correct markdown updates
 - [x] Changes applied only to `README.md` and `/docs/**`
-- [ ] No direct push to protected branches (GitLab adapter stubbed)
-- [ ] MR created with a clear description (GitLab adapter stubbed)
+- [x] No direct push to protected branches (branch created via API, MR targets default branch)
+- [x] MR created with a clear description (lists updated documents, prompts human review)
 - [x] No MR created when there are no meaningful changes
 - [x] Service is resilient to repeated runs and transient errors
-- [ ] Unit/integration tests cover critical paths
+- [x] Unit/integration tests cover critical paths
 - [x] Dry-run mode works
