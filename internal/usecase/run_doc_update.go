@@ -2,10 +2,12 @@ package usecase
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -153,6 +155,15 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 		return fmt.Errorf("run: map to docs: %w", err)
 	}
 
+	// 8b. Deduplicate by context hash — skip if we already processed this exact
+	// set of changes in a previous run (prevents redundant ACP calls and
+	// duplicate MR creation when the same commits are re-evaluated).
+	ctxHash := computeContextHash(changes, docPaths)
+	if ctxHash == runState.ContextHash {
+		uc.log.InfoContext(ctx, "run: context hash unchanged, nothing new to process")
+		return nil
+	}
+
 	// 9. For each doc path: read, call ACP, validate, write.
 	var updatedDocs []domain.Document
 	for _, docPath := range docPaths {
@@ -247,6 +258,7 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	runState.LastProcessedSHA = headSHA
 	runState.LastRunAt = time.Now()
 	runState.Status = domain.RunStatusSuccess
+	runState.ContextHash = ctxHash
 	if mrID != "" {
 		runState.OpenMRIDs = append(runState.OpenMRIDs, mrID)
 	}
@@ -259,6 +271,33 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// computeContextHash returns a stable SHA-256 hex digest of the input context
+// (the set of analyzed changes and target document paths). It is used to detect
+// duplicate runs that would produce identical documentation updates.
+func computeContextHash(changes []domain.AnalyzedChange, docPaths []string) string {
+	h := sha256.New()
+
+	// Sort changes by file path for a deterministic ordering.
+	sorted := make([]domain.AnalyzedChange, len(changes))
+	copy(sorted, changes)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Diff.Path < sorted[j].Diff.Path
+	})
+	for _, c := range sorted {
+		_, _ = fmt.Fprintf(h, "%s\x00%s\x00%s\x00", c.Diff.Path, string(c.Diff.Status), c.Diff.Patch)
+	}
+
+	// Sort doc paths for a deterministic ordering.
+	sortedDocs := make([]string, len(docPaths))
+	copy(sortedDocs, docPaths)
+	sort.Strings(sortedDocs)
+	for _, d := range sortedDocs {
+		_, _ = fmt.Fprintf(h, "%s\x00", d)
+	}
+
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // buildMRDescription creates a human-readable MR description.
