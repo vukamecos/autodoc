@@ -537,12 +537,22 @@ In MVP: choose one policy (update existing MR or skip) and fix it in config.
 
 ## Stage 2: Git integration (GitLab)
 
-- [ ] Implement GitLab adapter: clone/fetch repository
+- [x] Implement GitLab adapter: fetch / project connectivity check
+- [x] Implement diff retrieval between two SHAs
+- [x] Implement branch creation (`bot/docs-update/<timestamp>`)
+- [x] Implement commit and push (single-commit via Commits API)
+- [x] Implement MR creation with description
+- [x] Implement open bot MR check (deduplication)
+
+## Stage 2b: Git integration (GitHub) — post-MVP
+
+- [ ] Implement GitHub adapter: fetch / project connectivity check
 - [ ] Implement diff retrieval between two SHAs
-- [ ] Implement branch creation (`bot/docs-update/<timestamp>`)
+- [ ] Implement branch creation
 - [ ] Implement commit and push
-- [ ] Implement MR creation with description
-- [ ] Implement open bot MR check (deduplication)
+- [ ] Implement PR creation with description
+- [ ] Implement open bot PR check (deduplication)
+- [ ] Add `github` provider to config and wire in `app.go`
 
 ## Stage 3: Change analysis
 
