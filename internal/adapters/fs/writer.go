@@ -64,17 +64,17 @@ func (w *Writer) WriteDocument(ctx context.Context, doc domain.Document) error {
 	tmpName := tmpFile.Name()
 
 	if _, err := tmpFile.WriteString(doc.Content); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpName)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("fs: write temp file for %q: %w", doc.Path, err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("fs: close temp file for %q: %w", doc.Path, err)
 	}
 
 	if err := os.Rename(tmpName, absPath); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return fmt.Errorf("fs: rename temp file to %q: %w", doc.Path, err)
 	}
 

@@ -130,7 +130,7 @@ func (c *Client) do(ctx context.Context, body []byte) (*http.Response, error) {
 	// can be reused, then close it before the caller sees the response.
 	if retryableStatuses[resp.StatusCode] {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 
 	return resp, nil

@@ -259,7 +259,7 @@ func buildMRDescription(docs []domain.Document) string {
 	sb.WriteString("This MR was automatically created by autodoc.\n\n")
 	sb.WriteString("**Updated documents:**\n")
 	for _, d := range docs {
-		sb.WriteString(fmt.Sprintf("- `%s`\n", d.Path))
+		fmt.Fprintf(&sb, "- `%s`\n", d.Path)
 	}
 	sb.WriteString("\nPlease review the changes before merging.")
 	return sb.String()

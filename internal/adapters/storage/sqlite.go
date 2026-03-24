@@ -38,7 +38,7 @@ func New(cfg config.StorageConfig, log *slog.Logger) (*Store, error) {
 	}
 
 	if _, err := db.Exec(schema); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("storage: create schema: %w", err)
 	}
 
