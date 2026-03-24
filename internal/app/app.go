@@ -13,9 +13,11 @@ import (
 
 	"github.com/vukamecos/autodoc/internal/adapters/acp"
 	fsadapter "github.com/vukamecos/autodoc/internal/adapters/fs"
+	githubadapter "github.com/vukamecos/autodoc/internal/adapters/github"
 	gitlabadapter "github.com/vukamecos/autodoc/internal/adapters/gitlab"
 	"github.com/vukamecos/autodoc/internal/adapters/storage"
 	"github.com/vukamecos/autodoc/internal/config"
+	"github.com/vukamecos/autodoc/internal/domain"
 	"github.com/vukamecos/autodoc/internal/observability"
 	"github.com/vukamecos/autodoc/internal/scheduler"
 	"github.com/vukamecos/autodoc/internal/usecase"
@@ -42,7 +44,10 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("app: init storage: %w", err)
 	}
 
-	gitlabAdapter := gitlabadapter.New(cfg.Repository, cfg.Git, log)
+	repoAdapter, mrAdapter, err := newProviderAdapters(cfg, log)
+	if err != nil {
+		return nil, err
+	}
 	acpClient := acp.New(cfg.ACP, log)
 	fsWriter := fsadapter.New(".", cfg.Documentation.AllowedPaths, log)
 	validator := validation.New(cfg.Validation, cfg.Documentation, log)
@@ -50,8 +55,8 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	mapper := usecase.NewDocumentMapper(cfg.Mapping)
 
 	uc := usecase.New(
-		gitlabAdapter,
-		gitlabAdapter,
+		repoAdapter,
+		mrAdapter,
 		store,
 		fsWriter,
 		fsWriter,
@@ -108,6 +113,21 @@ func (a *App) Run(ctx context.Context) error {
 	<-ctx.Done()
 	a.log.InfoContext(ctx, "app: context cancelled, shutting down")
 	return a.Shutdown(context.Background())
+}
+
+// newProviderAdapters constructs the RepositoryPort and MRCreatorPort for the
+// configured provider ("gitlab" or "github"). Returns an error for unknown providers.
+func newProviderAdapters(cfg *config.Config, log *slog.Logger) (domain.RepositoryPort, domain.MRCreatorPort, error) {
+	switch cfg.Repository.Provider {
+	case "gitlab", "":
+		a := gitlabadapter.New(cfg.Repository, cfg.Git, log)
+		return a, a, nil
+	case "github":
+		a := githubadapter.New(cfg.Repository, cfg.Git, log)
+		return a, a, nil
+	default:
+		return nil, nil, fmt.Errorf("app: unknown repository provider %q (supported: gitlab, github)", cfg.Repository.Provider)
+	}
 }
 
 // Shutdown gracefully stops the scheduler and HTTP server.

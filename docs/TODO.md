@@ -552,7 +552,7 @@ In MVP: choose one policy (update existing MR or skip) and fix it in config.
 - [x] Implement commit and push (Git Data API: blob → tree → commit → ref)
 - [x] Implement PR creation with description
 - [x] Implement open bot PR check (deduplication by branch prefix)
-- [ ] Add `github` provider to config and wire in `app.go`
+- [x] Add `github` provider to config and wire in `app.go`
 
 ## Stage 3: Change analysis
 
