@@ -1,0 +1,50 @@
+scheduler:
+  cron: "0 * * * *"
+
+repository:
+  provider: gitlab
+  url: "https://gitlab.example.com"
+  project_id: "my-group/my-repo"
+  default_branch: main
+  protected_branches:
+    - main
+    - master
+
+documentation:
+  allowed_paths:
+    - README.md
+    - docs/**
+  primary_language: en
+  required_sections:
+    readme:
+      - "Description"
+      - "Running"
+      - "Configuration"
+
+mapping:
+  rules:
+    - match:
+        paths:
+          - "internal/**"
+          - "cmd/**"
+      update:
+        - README.md
+        - docs/architecture.md
+
+acp:
+  base_url: "http://acp-agent:8080"
+  timeout: 120s
+  max_context_bytes: 500000
+  mode: structured_output
+
+git:
+  branch_prefix: "bot/docs-update/"
+  commit_message_template: "docs: update documentation for recent repository changes"
+
+validation:
+  markdown_lint: true
+  forbid_non_doc_changes: true
+  max_changed_files: 20
+
+storage:
+  dsn: "autodoc.db"

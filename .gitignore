@@ -1,0 +1,21 @@
+# Binaries
+/autodoc
+*.exe
+
+# Build output
+dist/
+bin/
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
