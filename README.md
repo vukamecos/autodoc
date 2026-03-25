@@ -30,27 +30,53 @@ Runs are deduplicated by a SHA-256 hash of the input context, so repeated runs w
 # Build
 make build
 
-# Run with the default config file
+# Run with the default config file (starts scheduler)
 make run
 
 # Or directly
-./bin/autodoc -config autodoc.yaml
+./bin/autodoc run --config autodoc.yaml
 ```
 
-### Flags
+### Commands
+
+| Command | Description |
+|---|---|
+| `run` | Start the scheduler (default behavior) |
+| `once` | Execute a single run without starting scheduler |
+| `validate` | Validate configuration without running |
+| `version` | Print version information |
+| `completion` | Generate shell completion scripts |
+
+### Global Flags
 
 | Flag | Default | Description |
 |---|---|---|
-| `-config` | `autodoc.yaml` | Path to the YAML configuration file |
-| `-dry-run` | `false` | Analyse and generate updates but skip writing files and creating MR/PR |
-| `-log-level` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `--config` | `autodoc.yaml` | Path to the YAML configuration file |
+| `--dry-run` | `false` | Analyse and generate updates but skip writing files and creating MR/PR |
+| `--log-level` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
 ### Dry-run mode
 
 Dry-run executes the full pipeline — diff, ACP call, validation — but does not write any files or create a branch/MR. Useful for verifying configuration and agent output without side effects.
 
 ```bash
-./bin/autodoc -config autodoc.yaml -dry-run
+./bin/autodoc --config autodoc.yaml --dry-run once
+```
+
+### One-shot execution
+
+Run autodoc once without starting the scheduler (useful for CI/CD or manual triggers):
+
+```bash
+./bin/autodoc once --config autodoc.yaml
+```
+
+### Configuration validation
+
+Validate your configuration without running the service:
+
+```bash
+./bin/autodoc validate --config autodoc.yaml
 ```
 
 ## Configuration
@@ -195,7 +221,7 @@ documentation:
 
 ```bash
 export AUTODOC_GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
-./bin/autodoc -config autodoc.yaml
+./bin/autodoc run --config autodoc.yaml
 ```
 
 ### Minimal GitHub example
@@ -216,7 +242,7 @@ documentation:
 
 ```bash
 export AUTODOC_GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
-./bin/autodoc -config autodoc.yaml
+./bin/autodoc run --config autodoc.yaml
 ```
 
 ### Using Ollama (local LLM)
@@ -251,7 +277,7 @@ documentation:
 
 ```bash
 export AUTODOC_GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
-./bin/autodoc -config autodoc.yaml
+./bin/autodoc run --config autodoc.yaml
 ```
 
 Recommended models: `qwen3:8b`, `qwen3:14b`, `llama3.1`, `llama3.1:70b`, `codestral`, `mistral`, `qwen2.5-coder`. Larger models produce better documentation but require more RAM and time.

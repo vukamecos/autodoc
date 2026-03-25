@@ -1,96 +1,95 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"time"
 
+	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Scheduler     SchedulerConfig     `yaml:"scheduler"`
-	Repository    RepositoryConfig    `yaml:"repository"`
-	Documentation DocumentationConfig `yaml:"documentation"`
-	Mapping       MappingConfig       `yaml:"mapping"`
-	ACP           ACPConfig           `yaml:"acp"`
-	Git           GitConfig           `yaml:"git"`
-	Validation    ValidationConfig    `yaml:"validation"`
-	Storage       StorageConfig       `yaml:"storage"`
-	Observability ObservabilityConfig `yaml:"observability"`
+	Scheduler     SchedulerConfig     `mapstructure:"scheduler" yaml:"scheduler"`
+	Repository    RepositoryConfig    `mapstructure:"repository" yaml:"repository"`
+	Documentation DocumentationConfig `mapstructure:"documentation" yaml:"documentation"`
+	Mapping       MappingConfig       `mapstructure:"mapping" yaml:"mapping"`
+	ACP           ACPConfig           `mapstructure:"acp" yaml:"acp"`
+	Git           GitConfig           `mapstructure:"git" yaml:"git"`
+	Validation    ValidationConfig    `mapstructure:"validation" yaml:"validation"`
+	Storage       StorageConfig       `mapstructure:"storage" yaml:"storage"`
+	Observability ObservabilityConfig `mapstructure:"observability" yaml:"observability"`
 }
 
 type SchedulerConfig struct {
-	Cron string `yaml:"cron"`
+	Cron string `mapstructure:"cron" yaml:"cron"`
 }
 
 type RepositoryConfig struct {
-	Provider          string        `yaml:"provider"`
-	URL               string        `yaml:"url"`
-	Token             string        `yaml:"token"`
-	DefaultBranch     string        `yaml:"default_branch"`
-	ProtectedBranches []string      `yaml:"protected_branches"`
-	ProjectID         string        `yaml:"project_id"`
-	MaxRetries        int           `yaml:"max_retries"`
-	RetryDelay        time.Duration `yaml:"retry_delay"`
+	Provider          string        `mapstructure:"provider" yaml:"provider"`
+	URL               string        `mapstructure:"url" yaml:"url"`
+	Token             string        `mapstructure:"token" yaml:"token"`
+	DefaultBranch     string        `mapstructure:"default_branch" yaml:"default_branch"`
+	ProtectedBranches []string      `mapstructure:"protected_branches" yaml:"protected_branches"`
+	ProjectID         string        `mapstructure:"project_id" yaml:"project_id"`
+	MaxRetries        int           `mapstructure:"max_retries" yaml:"max_retries"`
+	RetryDelay        time.Duration `mapstructure:"retry_delay" yaml:"retry_delay"`
 }
 
 type DocumentationConfig struct {
-	AllowedPaths      []string            `yaml:"allowed_paths"`
-	PrimaryLanguage   string              `yaml:"primary_language"`
-	SupportedLanguages []string           `yaml:"supported_languages"` // e.g., ["en", "ru", "de"]
-	RequiredSections  map[string][]string `yaml:"required_sections"`
+	AllowedPaths       []string            `mapstructure:"allowed_paths" yaml:"allowed_paths"`
+	PrimaryLanguage    string              `mapstructure:"primary_language" yaml:"primary_language"`
+	SupportedLanguages []string            `mapstructure:"supported_languages" yaml:"supported_languages"`
+	RequiredSections   map[string][]string `mapstructure:"required_sections" yaml:"required_sections"`
 }
 
 type MappingRule struct {
-	Match  MappingMatch `yaml:"match"`
-	Update []string     `yaml:"update"`
+	Match  MappingMatch `mapstructure:"match" yaml:"match"`
+	Update []string     `mapstructure:"update" yaml:"update"`
 }
 
 type MappingMatch struct {
-	Paths []string `yaml:"paths"`
+	Paths []string `mapstructure:"paths" yaml:"paths"`
 }
 
 type MappingConfig struct {
-	Rules []MappingRule `yaml:"rules"`
+	Rules []MappingRule `mapstructure:"rules" yaml:"rules"`
 }
 
 type ACPConfig struct {
-	Provider               string        `yaml:"provider"`                 // "acp" (default) or "ollama"
-	Model                  string        `yaml:"model"`                    // Ollama model name (e.g. "llama3.1")
-	BaseURL                string        `yaml:"base_url"`
-	Token                  string        `yaml:"token"`
-	Timeout                time.Duration `yaml:"timeout"`
-	MaxContextBytes        int           `yaml:"max_context_bytes"`
-	Mode                   string        `yaml:"mode"`
-	MaxRetries             int           `yaml:"max_retries"`
-	RetryDelay             time.Duration `yaml:"retry_delay"`
-	CircuitBreakerEnabled  bool          `yaml:"circuit_breaker_enabled"`  // default: true
-	CircuitBreakerThreshold uint32       `yaml:"circuit_breaker_threshold"` // consecutive failures to open, default: 5
-	CircuitBreakerTimeout  time.Duration `yaml:"circuit_breaker_timeout"`   // time before half-open, default: 30s
+	Provider                string        `mapstructure:"provider" yaml:"provider"`
+	Model                   string        `mapstructure:"model" yaml:"model"`
+	BaseURL                 string        `mapstructure:"base_url" yaml:"base_url"`
+	Token                   string        `mapstructure:"token" yaml:"token"`
+	Timeout                 time.Duration `mapstructure:"timeout" yaml:"timeout"`
+	MaxContextBytes         int           `mapstructure:"max_context_bytes" yaml:"max_context_bytes"`
+	Mode                    string        `mapstructure:"mode" yaml:"mode"`
+	MaxRetries              int           `mapstructure:"max_retries" yaml:"max_retries"`
+	RetryDelay              time.Duration `mapstructure:"retry_delay" yaml:"retry_delay"`
+	CircuitBreakerEnabled   bool          `mapstructure:"circuit_breaker_enabled" yaml:"circuit_breaker_enabled"`
+	CircuitBreakerThreshold uint32        `mapstructure:"circuit_breaker_threshold" yaml:"circuit_breaker_threshold"`
+	CircuitBreakerTimeout   time.Duration `mapstructure:"circuit_breaker_timeout" yaml:"circuit_breaker_timeout"`
 }
 
 type GitConfig struct {
-	BranchPrefix          string `yaml:"branch_prefix"`
-	CommitMessageTemplate string `yaml:"commit_message_template"`
+	BranchPrefix          string `mapstructure:"branch_prefix" yaml:"branch_prefix"`
+	CommitMessageTemplate string `mapstructure:"commit_message_template" yaml:"commit_message_template"`
 }
 
 type ValidationConfig struct {
-	MarkdownLint        bool    `yaml:"markdown_lint"`
-	ForbidNonDocChanges bool    `yaml:"forbid_non_doc_changes"`
-	MaxChangedFiles     int     `yaml:"max_changed_files"`
-	// MinContentRatio is the minimum allowed ratio of updated/original content
-	// length. Prevents ACP from accidentally deleting most of a document.
-	// 0 disables the check. Default: 0.2 (document must keep ≥20% of original size).
-	MinContentRatio     float64 `yaml:"min_content_ratio"`
+	MarkdownLint        bool    `mapstructure:"markdown_lint" yaml:"markdown_lint"`
+	ForbidNonDocChanges bool    `mapstructure:"forbid_non_doc_changes" yaml:"forbid_non_doc_changes"`
+	MaxChangedFiles     int     `mapstructure:"max_changed_files" yaml:"max_changed_files"`
+	MinContentRatio     float64 `mapstructure:"min_content_ratio" yaml:"min_content_ratio"`
 }
 
 type StorageConfig struct {
-	DSN string `yaml:"dsn"`
+	DSN string `mapstructure:"dsn" yaml:"dsn"`
 }
 
 type ObservabilityConfig struct {
-	PprofEnabled bool   `yaml:"pprof_enabled"`
-	PprofAddr    string `yaml:"pprof_addr"` // defaults to ":6060" when pprof is enabled
+	PprofEnabled bool   `mapstructure:"pprof_enabled" yaml:"pprof_enabled"`
+	PprofAddr    string `mapstructure:"pprof_addr" yaml:"pprof_addr"`
 }
 
 // Load reads a YAML config file at path, applies defaults and environment overrides,
@@ -119,6 +118,55 @@ func Load(path string) (*Config, error) {
 	}
 
 	// Validate configuration (fail fast on invalid config)
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+// LoadFromViper loads configuration from viper (which has already been initialized).
+// This is the preferred method when using Cobra CLI.
+func LoadFromViper() (*Config, error) {
+	cfg := &Config{}
+	applyDefaults(cfg)
+
+	// Unmarshal viper config into our struct
+	if err := viper.Unmarshal(cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Handle environment variable overrides for tokens
+	// These take precedence over config file values
+	if tok := os.Getenv("AUTODOC_GITLAB_TOKEN"); tok != "" {
+		cfg.Repository.Token = tok
+	}
+	if tok := os.Getenv("AUTODOC_GITHUB_TOKEN"); tok != "" {
+		cfg.Repository.Token = tok
+	}
+	if tok := os.Getenv("AUTODOC_ACP_TOKEN"); tok != "" {
+		cfg.ACP.Token = tok
+	}
+
+	// Also check viper environment variables
+	if tok := viper.GetString("gitlab_token"); tok != "" {
+		cfg.Repository.Token = tok
+	}
+	if tok := viper.GetString("github_token"); tok != "" {
+		cfg.Repository.Token = tok
+	}
+	if tok := viper.GetString("acp_token"); tok != "" {
+		cfg.ACP.Token = tok
+	}
+
+	// Apply auto-corrections and defaults where needed
+	_, corrections := cfg.ValidateAndSetDefaults()
+	if len(corrections) > 0 {
+		// Log corrections via caller if needed
+		// For now, we just apply them silently
+	}
+
+	// Final validation
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

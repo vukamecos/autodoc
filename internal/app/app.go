@@ -36,6 +36,7 @@ type App struct {
 	log       *slog.Logger
 	httpSrv   *http.Server
 	pprofSrv  *http.Server // nil when pprof is disabled
+	useCase   *usecase.RunDocUpdateUseCase
 }
 
 // New constructs all adapters, the use case, and registers the cron job.
@@ -126,6 +127,56 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		log:       log,
 		httpSrv:   httpSrv,
 		pprofSrv:  pprofSrv,
+		useCase:   uc,
+	}, nil
+}
+
+// NewOnce creates an App for one-shot execution (no scheduler).
+func NewOnce(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
+	reg := prometheus.NewRegistry()
+	metrics := observability.NewMetrics(reg)
+
+	store, err := storage.New(cfg.Storage, log)
+	if err != nil {
+		return nil, fmt.Errorf("app: init storage: %w", err)
+	}
+
+	repoAdapter, mrAdapter, err := newProviderAdapters(cfg, log)
+	if err != nil {
+		return nil, err
+	}
+	acpClient, err := newACPAdapter(cfg, log, metrics)
+	if err != nil {
+		return nil, err
+	}
+	fsWriter := fsadapter.New(".", cfg.Documentation.AllowedPaths, log)
+	validator := validation.New(cfg.Validation, cfg.Documentation, log, metrics)
+	analyzer := usecase.NewChangeAnalyzer()
+	mapper := usecase.NewDocumentMapper(cfg.Mapping)
+
+	uc := usecase.New(
+		repoAdapter,
+		mrAdapter,
+		store,
+		fsWriter,
+		fsWriter,
+		acpClient,
+		analyzer,
+		mapper,
+		validator,
+		cfg.Git,
+		cfg.ACP,
+		dryRun,
+		log,
+		metrics,
+	)
+
+	return &App{
+		cfg:     cfg,
+		store:   store,
+		metrics: metrics,
+		log:     log,
+		useCase: uc,
 	}, nil
 }
 
@@ -171,6 +222,12 @@ func (a *App) Run(ctx context.Context) error {
 	return a.Shutdown(context.Background())
 }
 
+// RunOnce executes a single documentation update run without the scheduler.
+// This is used for the "once" command and one-shot executions.
+func (a *App) RunOnce(ctx context.Context) error {
+	return a.useCase.Run(ctx)
+}
+
 // newProviderAdapters constructs the RepositoryPort and MRCreatorPort for the
 // configured provider ("gitlab" or "github"). Returns an error for unknown providers.
 func newProviderAdapters(cfg *config.Config, log *slog.Logger) (domain.RepositoryPort, domain.MRCreatorPort, error) {
@@ -203,15 +260,19 @@ func newACPAdapter(cfg *config.Config, log *slog.Logger, metrics *observability.
 
 // Shutdown gracefully stops the scheduler and HTTP server.
 func (a *App) Shutdown(ctx context.Context) error {
-	shutdownCtx := a.scheduler.Stop()
-	select {
-	case <-shutdownCtx.Done():
-	case <-time.After(30 * time.Second):
-		a.log.Warn("app: scheduler stop timed out")
+	if a.scheduler != nil {
+		shutdownCtx := a.scheduler.Stop()
+		select {
+		case <-shutdownCtx.Done():
+		case <-time.After(30 * time.Second):
+			a.log.Warn("app: scheduler stop timed out")
+		}
 	}
 
-	if err := a.httpSrv.Shutdown(ctx); err != nil {
-		return fmt.Errorf("app: http shutdown: %w", err)
+	if a.httpSrv != nil {
+		if err := a.httpSrv.Shutdown(ctx); err != nil {
+			return fmt.Errorf("app: http shutdown: %w", err)
+		}
 	}
 
 	if a.pprofSrv != nil {
@@ -220,8 +281,10 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	if err := a.store.Close(); err != nil {
-		return fmt.Errorf("app: close store: %w", err)
+	if a.store != nil {
+		if err := a.store.Close(); err != nil {
+			return fmt.Errorf("app: close store: %w", err)
+		}
 	}
 
 	a.log.Info("app: shutdown complete")
