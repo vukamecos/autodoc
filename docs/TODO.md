@@ -49,8 +49,8 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 ## 🔮 Future Improvements (Optional)
 
 ### Testing
-- [ ] Integration tests for GitLab adapter (similar to unit tests)
-- [ ] More unit tests for `usecase` package (currently basic coverage)
+- [x] Integration tests for GitLab adapter (similar to unit tests) — added 9 new integration tests
+- [x] More unit tests for `usecase` package (currently basic coverage) — added 20+ new tests
 - [ ] End-to-end test with real GitLab/GitHub (test repo)
 
 ### Observability

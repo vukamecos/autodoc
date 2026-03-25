@@ -3,9 +3,11 @@ package gitlab
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -487,3 +489,277 @@ func TestDiff_PassesQueryParams(t *testing.T) {
 	}
 }
 
+
+// ---------------------------------------------------------------------------
+// Full workflow integration tests
+// ---------------------------------------------------------------------------
+
+func TestFullWorkflow_CreateBranchCommitAndMR(t *testing.T) {
+	mux := http.NewServeMux()
+	
+	// Project info
+	mux.HandleFunc(projectPrefix, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"id": 42, "name": "test-repo"})
+	})
+	
+	// HeadSHA
+	mux.HandleFunc(projectPrefix+"/repository/branches/"+testBranch, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"commit": map[string]string{"id": "abc123"}})
+	})
+	
+	// Create branch
+	mux.HandleFunc(projectPrefix+"/repository/branches", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			writeJSON(w, map[string]any{"name": body["branch"], "commit": map[string]string{"id": "abc123"}})
+		}
+	})
+	
+	// Commit files
+	mux.HandleFunc(projectPrefix+"/repository/files/", func(w http.ResponseWriter, r *http.Request) {
+		// File exists check
+		writeJSON(w, map[string]string{"file_name": "README.md"})
+	})
+	
+	var commitCalled bool
+	mux.HandleFunc(projectPrefix+"/repository/commits", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			commitCalled = true
+			writeJSON(w, map[string]string{"id": "commit123"})
+		}
+	})
+	
+	// Create MR
+	var mrCalled bool
+	mux.HandleFunc(projectPrefix+"/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			mrCalled = true
+			writeJSON(w, map[string]any{"iid": 42, "web_url": "https://gitlab.example.com/mr/42"})
+		}
+	})
+	
+	a := newTestAdapter(t, mux)
+	
+	// Step 1: Fetch
+	if err := a.Fetch(ctx); err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	
+	// Step 2: Create branch
+	if err := a.CreateBranch(ctx, "bot/docs-update/123"); err != nil {
+		t.Fatalf("CreateBranch() error: %v", err)
+	}
+	
+	// Step 3: Commit files
+	docs := []domain.Document{{Path: "README.md", Content: "# Updated"}}
+	if err := a.CommitFiles(ctx, "bot/docs-update/123", docs, "docs: update"); err != nil {
+		t.Fatalf("CommitFiles() error: %v", err)
+	}
+	if !commitCalled {
+		t.Error("expected commit endpoint to be called")
+	}
+	
+	// Step 4: Create MR
+	mr := domain.MergeRequest{
+		Title:       "Docs: update",
+		Description: "Automated update",
+		Branch:      "bot/docs-update/123",
+	}
+	mrID, err := a.CreateMR(ctx, mr)
+	if err != nil {
+		t.Fatalf("CreateMR() error: %v", err)
+	}
+	if !mrCalled {
+		t.Error("expected MR endpoint to be called")
+	}
+	if mrID != "42" {
+		t.Errorf("expected MR ID 42, got %q", mrID)
+	}
+}
+
+func TestDiff_WithLargeFileList(t *testing.T) {
+	a := newTestAdapter(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertToken(t, r)
+		
+		// Simulate 100 files changed
+		diffs := make([]map[string]any, 100)
+		for i := range diffs {
+			diffs[i] = map[string]any{
+				"old_path":     fmt.Sprintf("internal/file%d.go", i),
+				"new_path":     fmt.Sprintf("internal/file%d.go", i),
+				"diff":         fmt.Sprintf("@@ -1 +1 @@\n-old%d\n+new%d\n", i, i),
+				"new_file":     false,
+				"renamed_file": false,
+				"deleted_file": false,
+			}
+		}
+		writeJSON(w, map[string]any{"diffs": diffs})
+	}))
+	
+	diffs, err := a.Diff(ctx, "sha1", "sha2")
+	if err != nil {
+		t.Fatalf("Diff() error: %v", err)
+	}
+	if len(diffs) != 100 {
+		t.Errorf("expected 100 diffs, got %d", len(diffs))
+	}
+}
+
+func TestCommitFiles_MultipleFilesWithMixedActions(t *testing.T) {
+	var capturedActions []map[string]any
+	
+	mux := http.NewServeMux()
+	
+	// File exists checks
+	mux.HandleFunc(projectPrefix+"/repository/files/README.md", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]string{"file_name": "README.md"}) // exists
+	})
+	mux.HandleFunc(projectPrefix+"/repository/files/docs%2Fnew.md", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r) // doesn't exist
+	})
+	mux.HandleFunc(projectPrefix+"/repository/files/docs%2Fexisting.md", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]string{"file_name": "existing.md"}) // exists
+	})
+	
+	mux.HandleFunc(projectPrefix+"/repository/commits", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var body struct {
+				Actions []map[string]any `json:"actions"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			capturedActions = body.Actions
+			writeJSON(w, map[string]string{"id": "commit123"})
+		}
+	})
+	
+	a := newTestAdapter(t, mux)
+	
+	docs := []domain.Document{
+		{Path: "README.md", Content: "# Updated README"},
+		{Path: "docs/new.md", Content: "# New doc"},
+		{Path: "docs/existing.md", Content: "# Updated existing"},
+	}
+	
+	if err := a.CommitFiles(ctx, "bot/test", docs, "docs: update"); err != nil {
+		t.Fatalf("CommitFiles() error: %v", err)
+	}
+	
+	if len(capturedActions) != 3 {
+		t.Fatalf("expected 3 actions, got %d", len(capturedActions))
+	}
+	
+	// Verify correct actions
+	actionMap := make(map[string]string)
+	for _, a := range capturedActions {
+		actionMap[a["file_path"].(string)] = a["action"].(string)
+	}
+	
+	if actionMap["README.md"] != "update" {
+		t.Errorf("README.md: expected 'update', got %q", actionMap["README.md"])
+	}
+	if actionMap["docs/new.md"] != "create" {
+		t.Errorf("docs/new.md: expected 'create', got %q", actionMap["docs/new.md"])
+	}
+	if actionMap["docs/existing.md"] != "update" {
+		t.Errorf("docs/existing.md: expected 'update', got %q", actionMap["docs/existing.md"])
+	}
+}
+
+func TestOpenBotMRs_LabelFiltering(t *testing.T) {
+	a := newTestAdapter(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertToken(t, r)
+		
+		state := r.URL.Query().Get("state")
+		label := r.URL.Query().Get("labels")
+		
+		if state != "opened" || label != botLabel {
+			t.Errorf("expected state=opened and labels=%s, got state=%s labels=%s", botLabel, state, label)
+		}
+		
+		// GitLab API returns only MRs with the specified label
+		writeJSON(w, []map[string]any{
+			{
+				"iid": 1, "title": "Bot: docs", "description": "auto",
+				"source_branch": "bot/docs-update/1", "web_url": "https://example.com/1",
+			},
+			{
+				"iid": 3, "title": "Bot: more docs", "description": "auto",
+				"source_branch": "bot/docs-update/3", "web_url": "https://example.com/3",
+			},
+		})
+	}))
+	
+	mrs, err := a.OpenBotMRs(ctx)
+	if err != nil {
+		t.Fatalf("OpenBotMRs() error: %v", err)
+	}
+	
+	// All returned MRs should have bot label (GitLab filters by label server-side)
+	if len(mrs) != 2 {
+		t.Errorf("expected 2 bot MRs, got %d", len(mrs))
+	}
+	
+	for _, mr := range mrs {
+		if !strings.HasPrefix(mr.Branch, "bot/") {
+			t.Errorf("expected bot branch, got %q", mr.Branch)
+		}
+	}
+}
+
+func TestCreateMR_WithSpecialCharacters(t *testing.T) {
+	var capturedBody map[string]any
+	
+	a := newTestAdapter(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+			writeJSON(w, map[string]any{"iid": 99, "web_url": "https://example.com/99"})
+		}
+	}))
+	
+	mr := domain.MergeRequest{
+		Title:       "Docs: update README with \"special\" chars <>&",
+		Description: "Line 1\nLine 2\n\n- Item 1\n- Item 2\n",
+		Branch:      "bot/docs-update/" + fmt.Sprintf("%d", time.Now().Unix()),
+	}
+	
+	id, err := a.CreateMR(ctx, mr)
+	if err != nil {
+		t.Fatalf("CreateMR() error: %v", err)
+	}
+	
+	if id != "99" {
+		t.Errorf("expected id 99, got %q", id)
+	}
+	
+	if capturedBody["title"] != mr.Title {
+		t.Errorf("title mismatch: expected %q, got %q", mr.Title, capturedBody["title"])
+	}
+}
+
+func TestAdapter_NumericProjectID(t *testing.T) {
+	// Test with numeric project ID (42)
+	var requestPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		writeJSON(w, map[string]any{"id": 42, "name": "test"})
+	}))
+	defer srv.Close()
+	
+	cfg := config.RepositoryConfig{
+		URL:           srv.URL,
+		ProjectID:     "42",
+		DefaultBranch: "main",
+		Token:         "token",
+	}
+	a := New(cfg, config.GitConfig{}, slog.Default())
+	
+	if err := a.Fetch(ctx); err != nil {
+		t.Fatalf("Fetch() error: %v", err)
+	}
+	
+	// Project ID should be in the path
+	if !strings.Contains(requestPath, "/projects/42") {
+		t.Errorf("expected project ID in path, got %s", requestPath)
+	}
+}

@@ -1,6 +1,8 @@
 package usecase
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/vukamecos/autodoc/internal/domain"
@@ -182,4 +184,273 @@ func makeChanges(patches ...string) []domain.AnalyzedChange {
 		}
 	}
 	return out
+}
+
+// ---------------------------------------------------------------------------
+// diffBudget tests
+// ---------------------------------------------------------------------------
+
+func TestDiffBudget_NormalCase(t *testing.T) {
+	uc := &RunDocUpdateUseCase{maxContextBytes: 500000}
+	
+	// Document size 10000, overhead 2048
+	// budget = 500000 - 10000 - 2048 = 487952
+	budget := uc.diffBudget(10000)
+	expected := 500000 - 10000 - 2048
+	
+	if budget != expected {
+		t.Errorf("expected budget %d, got %d", expected, budget)
+	}
+}
+
+func TestDiffBudget_LargeDocument(t *testing.T) {
+	uc := &RunDocUpdateUseCase{maxContextBytes: 500000}
+	
+	// Document takes most of the budget: 500000 - 480000 - 2048 = 17952
+	// Since 17952 >= 2048 (overhead), we get the calculated budget
+	budget := uc.diffBudget(480000)
+	expected := 500000 - 480000 - 2048 // 17952
+	
+	if budget != expected {
+		t.Errorf("expected budget %d for large doc, got %d", expected, budget)
+	}
+}
+
+func TestDiffBudget_VeryLargeDocument(t *testing.T) {
+	uc := &RunDocUpdateUseCase{maxContextBytes: 500000}
+	
+	// Document leaves less than overhead: 500000 - 498000 - 2048 = -48
+	// Since -48 < 2048, we get maxContextBytes/4
+	budget := uc.diffBudget(498000)
+	expected := 500000 / 4 // 125000
+	
+	if budget != expected {
+		t.Errorf("expected minimum budget %d for very large doc, got %d", expected, budget)
+	}
+}
+
+func TestDiffBudget_EmptyDocument(t *testing.T) {
+	uc := &RunDocUpdateUseCase{maxContextBytes: 500000}
+	
+	budget := uc.diffBudget(0)
+	expected := 500000 - 0 - 2048
+	
+	if budget != expected {
+		t.Errorf("expected budget %d for empty doc, got %d", expected, budget)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// buildACPRequest tests
+// ---------------------------------------------------------------------------
+
+func TestBuildACPRequest_Content(t *testing.T) {
+	changes := []domain.AnalyzedChange{
+		{Diff: domain.FileDiff{Path: "a.go", Patch: "patch1"}},
+		{Diff: domain.FileDiff{Path: "b.go", Patch: "patch2"}},
+	}
+	doc := domain.Document{Path: "README.md", Content: "# Title\n"}
+	
+	req := buildACPRequest(changes, doc)
+	
+	if req.CorrelationID == "" {
+		t.Error("expected non-empty correlation ID")
+	}
+	
+	if !strings.Contains(req.Diff, "patch1") {
+		t.Error("expected diff to contain patch1")
+	}
+	if !strings.Contains(req.Diff, "patch2") {
+		t.Error("expected diff to contain patch2")
+	}
+	
+	if req.ChangeSummary != "2 files changed" {
+		t.Errorf("expected '2 files changed', got %q", req.ChangeSummary)
+	}
+	
+	if len(req.Documents) != 1 || req.Documents[0].Path != "README.md" {
+		t.Errorf("expected document README.md, got %v", req.Documents)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional computeContextHash tests
+// ---------------------------------------------------------------------------
+
+func TestComputeContextHash_EmptyInputs(t *testing.T) {
+	// Empty changes and docs should produce consistent hash
+	h1 := computeContextHash(nil, nil)
+	h2 := computeContextHash(nil, nil)
+	
+	if h1 != h2 {
+		t.Error("empty inputs should produce deterministic hash")
+	}
+	
+	if h1 == "" {
+		t.Error("empty inputs should produce non-empty hash")
+	}
+}
+
+func TestComputeContextHash_OnlyChanges(t *testing.T) {
+	changes := []domain.AnalyzedChange{
+		{Diff: domain.FileDiff{Path: "a.go", Patch: "p1"}},
+	}
+	h := computeContextHash(changes, nil)
+	
+	if h == "" {
+		t.Error("should produce non-empty hash with only changes")
+	}
+}
+
+func TestComputeContextHash_OnlyDocs(t *testing.T) {
+	docs := []string{"README.md"}
+	h := computeContextHash(nil, docs)
+	
+	if h == "" {
+		t.Error("should produce non-empty hash with only docs")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional mergeResponse tests
+// ---------------------------------------------------------------------------
+
+func TestMergeResponse_EmptyDst(t *testing.T) {
+	dst := &domain.ACPResponse{}
+	src := &domain.ACPResponse{
+		Summary: "source summary",
+		Files:   []domain.ACPFile{{Path: "a.md", Content: "a"}},
+		Notes:   []string{"note1"},
+	}
+	
+	mergeResponse(dst, src)
+	
+	if dst.Summary != "source summary" {
+		t.Errorf("expected summary 'source summary', got %q", dst.Summary)
+	}
+	if len(dst.Files) != 1 {
+		t.Errorf("expected 1 file, got %d", len(dst.Files))
+	}
+	if len(dst.Notes) != 1 {
+		t.Errorf("expected 1 note, got %d", len(dst.Notes))
+	}
+}
+
+func TestMergeResponse_EmptySrc(t *testing.T) {
+	dst := &domain.ACPResponse{
+		Summary: "existing",
+		Files:   []domain.ACPFile{{Path: "a.md", Content: "a"}},
+		Notes:   []string{"note1"},
+	}
+	src := &domain.ACPResponse{}
+	
+	mergeResponse(dst, src)
+	
+	if dst.Summary != "existing" {
+		t.Errorf("expected summary unchanged, got %q", dst.Summary)
+	}
+	if len(dst.Files) != 1 {
+		t.Errorf("expected 1 file unchanged, got %d", len(dst.Files))
+	}
+	if len(dst.Notes) != 1 {
+		t.Errorf("expected 1 note unchanged, got %d", len(dst.Notes))
+	}
+}
+
+func TestMergeResponse_MultipleMerges(t *testing.T) {
+	dst := &domain.ACPResponse{}
+	
+	mergeResponse(dst, &domain.ACPResponse{
+		Summary: "first",
+		Files:   []domain.ACPFile{{Path: "a.md", Content: "a1"}},
+		Notes:   []string{"note1"},
+	})
+	
+	mergeResponse(dst, &domain.ACPResponse{
+		Summary: "second",
+		Files:   []domain.ACPFile{{Path: "b.md", Content: "b1"}},
+		Notes:   []string{"note2"},
+	})
+	
+	mergeResponse(dst, &domain.ACPResponse{
+		Summary: "third",
+		Files:   []domain.ACPFile{{Path: "a.md", Content: "a2"}}, // overwrites
+		Notes:   []string{"note3"},
+	})
+	
+	// Summary should be concatenated
+	if dst.Summary != "first second third" {
+		t.Errorf("expected 'first second third', got %q", dst.Summary)
+	}
+	
+	// Should have 2 files
+	if len(dst.Files) != 2 {
+		t.Errorf("expected 2 files, got %d", len(dst.Files))
+	}
+	
+	// a.md should have latest content
+	for _, f := range dst.Files {
+		if f.Path == "a.md" && f.Content != "a2" {
+			t.Errorf("expected a.md content 'a2', got %q", f.Content)
+		}
+	}
+	
+	// Should have 3 notes
+	if len(dst.Notes) != 3 {
+		t.Errorf("expected 3 notes, got %d", len(dst.Notes))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Integration-style tests for the chunker flow
+// ---------------------------------------------------------------------------
+
+func TestChunkChanges_VariousSizes(t *testing.T) {
+	tests := []struct {
+		name          string
+		patchSizes    []int
+		budget        int
+		expectedChunks int
+	}{
+		{
+			name:          "all fit in one chunk",
+			patchSizes:    []int{100, 200, 300},
+			budget:        1000,
+			expectedChunks: 1,
+		},
+		{
+			name:          "splits into two",
+			patchSizes:    []int{600, 600},
+			budget:        1000,
+			expectedChunks: 2,
+		},
+		{
+			name:          "each in own chunk",
+			patchSizes:    []int{500, 500, 500},
+			budget:        600,
+			expectedChunks: 3,
+		},
+		{
+			name:          "empty patches",
+			patchSizes:    []int{0, 0, 0},
+			budget:        100,
+			expectedChunks: 1,
+		},
+	}
+	
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			changes := make([]domain.AnalyzedChange, len(tc.patchSizes))
+			for i, size := range tc.patchSizes {
+				changes[i] = domain.AnalyzedChange{
+					Diff: domain.FileDiff{Path: fmt.Sprintf("file%d.go", i), Patch: strings.Repeat("x", size)},
+				}
+			}
+			
+			chunks := chunkChanges(changes, tc.budget)
+			if len(chunks) != tc.expectedChunks {
+				t.Errorf("expected %d chunks, got %d", tc.expectedChunks, len(chunks))
+			}
+		})
+	}
 }
