@@ -55,7 +55,7 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 
 ### Critical
 - [x] **Fix dry-run mode**: flag parsed but hardcoded `false` in `app.New()`
-- [ ] **Fix ACPRequestDuration metric**: defined but never measured/updated in ACP/Ollama clients
+- [x] **Fix ACPRequestDuration metric**: now measured and updated in both ACP and Ollama clients
 
 ### Testing
 - [ ] **Unit tests for ACP client** (`internal/adapters/acp`)
@@ -82,7 +82,7 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 | `autodoc_docs_updated_total` | ✅ Implemented |
 | `autodoc_mr_created_total` | ✅ Implemented |
 | `autodoc_acp_requests_total{status}` | ✅ Implemented |
-| `autodoc_acp_request_duration_seconds` | ⚠️ Defined but **not collected** |
+| `autodoc_acp_request_duration_seconds` | ✅ **Now collected** |
 
 ---
 

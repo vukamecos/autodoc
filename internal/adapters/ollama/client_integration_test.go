@@ -56,7 +56,7 @@ func TestIntegration_Generate_RealOllama(t *testing.T) {
 		MaxRetries: 1,
 		RetryDelay: 2 * time.Second,
 	}
-	client := New(cfg, slog.Default())
+	client := New(cfg, slog.Default(), nil)
 
 	req := domain.ACPRequest{
 		CorrelationID: "integration-test-1",
@@ -155,7 +155,7 @@ func TestIntegration_Generate_MinimalDiff(t *testing.T) {
 		MaxRetries: 1,
 		RetryDelay: 2 * time.Second,
 	}
-	client := New(cfg, slog.Default())
+	client := New(cfg, slog.Default(), nil)
 
 	req := domain.ACPRequest{
 		CorrelationID: "integration-test-2",

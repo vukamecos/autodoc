@@ -27,7 +27,7 @@ func newTestClient(t *testing.T, handler http.Handler) *Client {
 		MaxRetries: 0,
 		RetryDelay: time.Millisecond,
 	}
-	return New(cfg, slog.Default())
+	return New(cfg, slog.Default(), nil)
 }
 
 func TestGenerate_Success(t *testing.T) {

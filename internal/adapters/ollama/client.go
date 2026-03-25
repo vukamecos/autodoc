@@ -11,9 +11,11 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/vukamecos/autodoc/internal/config"
 	"github.com/vukamecos/autodoc/internal/domain"
+	"github.com/vukamecos/autodoc/internal/observability"
 	"github.com/vukamecos/autodoc/internal/retry"
 )
 
@@ -48,10 +50,11 @@ type Client struct {
 	model      string
 	retryOpts  retry.Options
 	log        *slog.Logger
+	metrics    *observability.Metrics
 }
 
 // New constructs an Ollama Client.
-func New(cfg config.ACPConfig, log *slog.Logger) *Client {
+func New(cfg config.ACPConfig, log *slog.Logger, metrics *observability.Metrics) *Client {
 	base := cfg.BaseURL
 	if base == "" {
 		base = "http://localhost:11434"
@@ -62,6 +65,7 @@ func New(cfg config.ACPConfig, log *slog.Logger) *Client {
 		model:      cfg.Model,
 		retryOpts:  retry.Options{MaxRetries: cfg.MaxRetries, RetryDelay: cfg.RetryDelay},
 		log:        log,
+		metrics:    metrics,
 	}
 }
 
@@ -88,6 +92,7 @@ type chatResponse struct {
 
 // Generate sends the ACPRequest to Ollama and returns the parsed ACPResponse.
 func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.ACPResponse, error) {
+	start := time.Now()
 	userMsg := buildUserMessage(req)
 
 	ollamaReq := chatRequest{
@@ -123,16 +128,28 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 
 	resp, err := retry.Do(ctx, c.httpClient, c.retryOpts, makeReq)
 	if err != nil {
+		if c.metrics != nil {
+			c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
+			c.metrics.ACPRequestsTotal.WithLabelValues("failed").Inc()
+		}
 		return nil, fmt.Errorf("ollama: request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if c.metrics != nil {
+			c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
+			c.metrics.ACPRequestsTotal.WithLabelValues("failed").Inc()
+		}
 		return nil, fmt.Errorf("ollama: status %d: %w", resp.StatusCode, domain.ErrInvalidACPResponse)
 	}
 
 	var chatResp chatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+		if c.metrics != nil {
+			c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
+			c.metrics.ACPRequestsTotal.WithLabelValues("failed").Inc()
+		}
 		return nil, fmt.Errorf("ollama: decode chat response: %w", err)
 	}
 
@@ -144,11 +161,24 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 			slog.String("raw_content", truncate(content, 500)),
 			slog.String("error", err.Error()),
 		)
+		if c.metrics != nil {
+			c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
+			c.metrics.ACPRequestsTotal.WithLabelValues("failed").Inc()
+		}
 		return nil, fmt.Errorf("ollama: parse model output as ACPResponse: %w", domain.ErrInvalidACPResponse)
 	}
 
 	if acpResp.Summary == "" && len(acpResp.Files) == 0 {
+		if c.metrics != nil {
+			c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
+			c.metrics.ACPRequestsTotal.WithLabelValues("failed").Inc()
+		}
 		return nil, fmt.Errorf("ollama: response missing required fields: %w", domain.ErrInvalidACPResponse)
+	}
+
+	if c.metrics != nil {
+		c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
+		c.metrics.ACPRequestsTotal.WithLabelValues("success").Inc()
 	}
 
 	c.log.InfoContext(ctx, "ollama: received response",

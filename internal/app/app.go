@@ -52,7 +52,7 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	acpClient, err := newACPAdapter(cfg, log)
+	acpClient, err := newACPAdapter(cfg, log, metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -170,15 +170,15 @@ func newProviderAdapters(cfg *config.Config, log *slog.Logger) (domain.Repositor
 }
 
 // newACPAdapter constructs the ACPClientPort for the configured provider.
-func newACPAdapter(cfg *config.Config, log *slog.Logger) (domain.ACPClientPort, error) {
+func newACPAdapter(cfg *config.Config, log *slog.Logger, metrics *observability.Metrics) (domain.ACPClientPort, error) {
 	switch cfg.ACP.Provider {
 	case "acp", "":
-		return acp.New(cfg.ACP, log), nil
+		return acp.New(cfg.ACP, log, metrics), nil
 	case "ollama":
 		if cfg.ACP.Model == "" {
 			return nil, fmt.Errorf("app: acp.model is required when provider is \"ollama\"")
 		}
-		return ollamaadapter.New(cfg.ACP, log), nil
+		return ollamaadapter.New(cfg.ACP, log, metrics), nil
 	default:
 		return nil, fmt.Errorf("app: unknown acp provider %q (supported: acp, ollama)", cfg.ACP.Provider)
 	}
