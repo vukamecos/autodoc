@@ -22,19 +22,20 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] Dry-run mode
 - [x] Prometheus metrics
 
-### Testing (66+ tests)
+### Testing (79+ tests)
 | Package | Tests |
 |---------|-------|
 | `adapters/acp` | 9 |
 | `adapters/fs` | 15 |
 | `adapters/github` | 16 |
-| `adapters/gitlab` | 15 |
+| `adapters/gitlab` | 24 (9 integration) |
 | `adapters/ollama` | 6 |
 | `adapters/storage` | 6 |
+| `circuitbreaker` | 13 |
 | `markdown` | 9 |
 | `retry` | 2 |
-| `usecase` | 3 |
-| `validation` | 16 |
+| `usecase` | 25+ |
+| `validation` | 16+ |
 
 ### Fixes Applied
 - [x] Dry-run mode wired correctly
@@ -67,7 +68,7 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [ ] Retry failed ACP calls with exponential backoff (different model?)
 
 ### Reliability
-- [ ] Circuit breaker for ACP/Ollama calls
+- [x] Circuit breaker for ACP/Ollama calls — implemented with 3 states, metrics, 13 tests
 - [ ] Graceful degradation when ACP is unavailable (queue for retry)
 - [ ] Backpressure when too many changes
 
@@ -84,6 +85,8 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 | `autodoc_acp_request_duration_seconds` | ✅ |
 | `autodoc_validation_failures_total{check}` | ✅ |
 | `autodoc_chunked_requests_total` | ✅ |
+| `autodoc_circuit_breaker_state{component}` | ✅ |
+| `autodoc_acp_requests_total{circuit_open}` | ✅ |
 
 **Health Endpoints:**
 - `/healthz` — Basic liveness (always returns 200 when running)
