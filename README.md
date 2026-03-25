@@ -130,11 +130,13 @@ mapping:
 # ACP agent
 # ---------------------------------------------------------------------------
 acp:
-  base_url: "http://acp-agent:8080"  # ACP agent endpoint (required)
+  provider: acp                       # "acp" (default) or "ollama"
+  model: ""                           # Required when provider is "ollama" (e.g. "llama3.1")
+  base_url: "http://acp-agent:8080"   # ACP endpoint, or Ollama URL (default: http://localhost:11434)
   timeout: 120s                       # Per-request timeout (default: 120s)
   max_context_bytes: 500000           # Context size cap in bytes (default: 500000)
                                       # Larger diffs are split into chunks.
-  mode: structured_output             # Passed to the agent as a hint
+  mode: structured_output             # Passed to the ACP agent as a hint (ignored by Ollama)
   max_retries: 3                      # Retries on transport errors / 5xx
   retry_delay: 1s                     # Base delay for exponential backoff
 
@@ -211,6 +213,43 @@ documentation:
 export AUTODOC_GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 ./bin/autodoc -config autodoc.yaml
 ```
+
+### Using Ollama (local LLM)
+
+autodoc can use [Ollama](https://ollama.com) as the LLM backend instead of a remote ACP agent. No API keys needed — the model runs locally.
+
+```bash
+# 1. Install and start Ollama
+ollama serve
+
+# 2. Pull a model
+ollama pull llama3.1
+```
+
+```yaml
+repository:
+  provider: gitlab
+  url: "https://gitlab.example.com"
+  project_id: "my-group/my-repo"
+
+acp:
+  provider: ollama
+  model: "llama3.1"             # Any model available in Ollama
+  # base_url defaults to http://localhost:11434
+  timeout: 300s                 # Local models may need more time
+
+documentation:
+  allowed_paths:
+    - README.md
+    - docs/**
+```
+
+```bash
+export AUTODOC_GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
+./bin/autodoc -config autodoc.yaml
+```
+
+Recommended models: `llama3.1`, `llama3.1:70b`, `codellama`, `mistral`, `qwen2.5-coder`. Larger models produce better documentation but require more RAM and time.
 
 ## HTTP endpoints
 

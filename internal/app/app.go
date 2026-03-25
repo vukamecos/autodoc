@@ -16,6 +16,7 @@ import (
 	fsadapter "github.com/vukamecos/autodoc/internal/adapters/fs"
 	githubadapter "github.com/vukamecos/autodoc/internal/adapters/github"
 	gitlabadapter "github.com/vukamecos/autodoc/internal/adapters/gitlab"
+	ollamaadapter "github.com/vukamecos/autodoc/internal/adapters/ollama"
 	"github.com/vukamecos/autodoc/internal/adapters/storage"
 	"github.com/vukamecos/autodoc/internal/config"
 	"github.com/vukamecos/autodoc/internal/domain"
@@ -50,7 +51,10 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	acpClient := acp.New(cfg.ACP, log)
+	acpClient, err := newACPAdapter(cfg, log)
+	if err != nil {
+		return nil, err
+	}
 	fsWriter := fsadapter.New(".", cfg.Documentation.AllowedPaths, log)
 	validator := validation.New(cfg.Validation, cfg.Documentation, log)
 	analyzer := usecase.NewChangeAnalyzer()
@@ -161,6 +165,21 @@ func newProviderAdapters(cfg *config.Config, log *slog.Logger) (domain.Repositor
 		return a, a, nil
 	default:
 		return nil, nil, fmt.Errorf("app: unknown repository provider %q (supported: gitlab, github)", cfg.Repository.Provider)
+	}
+}
+
+// newACPAdapter constructs the ACPClientPort for the configured provider.
+func newACPAdapter(cfg *config.Config, log *slog.Logger) (domain.ACPClientPort, error) {
+	switch cfg.ACP.Provider {
+	case "acp", "":
+		return acp.New(cfg.ACP, log), nil
+	case "ollama":
+		if cfg.ACP.Model == "" {
+			return nil, fmt.Errorf("app: acp.model is required when provider is \"ollama\"")
+		}
+		return ollamaadapter.New(cfg.ACP, log), nil
+	default:
+		return nil, fmt.Errorf("app: unknown acp provider %q (supported: acp, ollama)", cfg.ACP.Provider)
 	}
 }
 

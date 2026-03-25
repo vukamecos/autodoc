@@ -54,6 +54,8 @@ type MappingConfig struct {
 }
 
 type ACPConfig struct {
+	Provider        string        `yaml:"provider"`          // "acp" (default) or "ollama"
+	Model           string        `yaml:"model"`             // Ollama model name (e.g. "llama3.1")
 	BaseURL         string        `yaml:"base_url"`
 	Token           string        `yaml:"token"`
 	Timeout         time.Duration `yaml:"timeout"`
