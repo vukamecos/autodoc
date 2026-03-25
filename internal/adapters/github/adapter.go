@@ -234,7 +234,7 @@ func (a *Adapter) CommitFiles(ctx context.Context, branch string, docs []domain.
 }
 
 // CreateMR opens a pull request and returns its number as a string.
-func (a *Adapter) CreateMR(ctx context.Context, mr domain.MergeRequest) (string, error) {
+func (a *Adapter) CreateMR(ctx context.Context, mr domain.MergeRequest) (domain.MergeRequest, error) {
 	body := map[string]any{
 		"title": mr.Title,
 		"body":  mr.Description,
@@ -248,17 +248,21 @@ func (a *Adapter) CreateMR(ctx context.Context, mr domain.MergeRequest) (string,
 	}
 	path := fmt.Sprintf("/repos/%s/%s/pulls", a.owner, a.repo)
 	if err := a.post(ctx, path, body, &resp); err != nil {
-		return "", fmt.Errorf("github create pr: %w", err)
+		return domain.MergeRequest{}, fmt.Errorf("github create pr: %w", err)
 	}
 
 	// Apply the bot label to the newly opened PR.
 	_ = a.addLabel(ctx, resp.Number)
 
+	created := domain.MergeRequest{
+		ID:  fmt.Sprintf("%d", resp.Number),
+		URL: resp.HTMLURL,
+	}
 	a.log.InfoContext(ctx, "github: PR created",
 		slog.Int("number", resp.Number),
 		slog.String("url", resp.HTMLURL),
 	)
-	return fmt.Sprintf("%d", resp.Number), nil
+	return created, nil
 }
 
 // OpenBotMRs returns all open pull requests created by the bot

@@ -369,12 +369,15 @@ func TestCreateMR(t *testing.T) {
 		Description: "Automated documentation update",
 		Branch:      "bot/docs-update/123",
 	}
-	id, err := a.CreateMR(ctx, mr)
+	created, err := a.CreateMR(ctx, mr)
 	if err != nil {
 		t.Fatalf("CreateMR() error: %v", err)
 	}
-	if id != "42" {
-		t.Errorf("expected id '42', got %q", id)
+	if created.ID != "42" {
+		t.Errorf("expected id '42', got %q", created.ID)
+	}
+	if created.URL != "https://github.com/"+testOwner+"/"+testRepo+"/pull/42" {
+		t.Errorf("unexpected url %q", created.URL)
 	}
 
 	if capturedBody["title"] != mr.Title {

@@ -28,12 +28,16 @@ func (uc *RunDocUpdateUseCase) generateWithChunking(
 		totalBytes += len(c.Diff.Patch)
 	}
 
-	// Auto-select model based on diff size if using Ollama
-	if uc.acpCfg.Provider == "ollama" && uc.acpCfg.Model == "" {
+	// Auto-select model based on diff size when using Ollama.
+	// SelectModel returns the configured model if one is set, or picks the
+	// best model from the size-based table when acp.model is empty.
+	selectedModel := ""
+	if uc.acpCfg.Provider == "ollama" {
 		selector := NewModelSelector(uc.acpCfg)
 		rec := selector.SelectModel(totalBytes)
-		uc.log.InfoContext(ctx, "model auto-selected", 
-			"model", rec.Model, 
+		selectedModel = rec.Model
+		uc.log.InfoContext(ctx, "chunker: model selected",
+			"model", rec.Model,
 			"reason", rec.Reason,
 			"confidence", rec.Confidence,
 		)
@@ -42,6 +46,7 @@ func (uc *RunDocUpdateUseCase) generateWithChunking(
 	if len(chunks) == 1 {
 		uc.log.InfoContext(ctx, "chunker: single chunk", "doc", current.Path, "budget", budget, "changes", totalChanges, "bytes", totalBytes)
 		req := buildACPRequest(chunks[0], current)
+		req.Model = selectedModel
 		return uc.acp.Generate(ctx, req)
 	}
 
@@ -62,6 +67,7 @@ func (uc *RunDocUpdateUseCase) generateWithChunking(
 
 	for i, chunk := range chunks {
 		req := buildACPRequest(chunk, current)
+		req.Model = selectedModel
 		req.Instructions = fmt.Sprintf(
 			"Update the documentation based on the provided code diff (part %d of %d). "+
 				"Preserve the existing style and structure. Only output the updated document.",

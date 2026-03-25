@@ -176,3 +176,11 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 	)
 	return result, nil
 }
+
+// ResetCircuit forces the circuit breaker back to closed state.
+// Used by the admin /admin/reset-circuit endpoint.
+func (c *Client) ResetCircuit() {
+	if c.circuitBreaker != nil {
+		c.circuitBreaker.Reset()
+	}
+}

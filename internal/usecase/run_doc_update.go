@@ -71,10 +71,15 @@ func New(
 
 // Run executes the full documentation update pipeline.
 func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
+	// Attach a unique run ID to every log line emitted during this execution
+	// so all pipeline steps can be correlated in structured log queries.
+	runID := fmt.Sprintf("%d", time.Now().UnixNano())
+	log := uc.log.With(slog.String("run_id", runID))
+
 	// 1. Load state; if not found, initialize with current HEAD and return.
 	runState, err := uc.state.LoadState(ctx)
 	if errors.Is(err, domain.ErrStateNotFound) {
-		uc.log.InfoContext(ctx, "run: no prior state found, initializing")
+		log.InfoContext(ctx, "run: no prior state found, initializing")
 		headSHA, headErr := uc.repo.HeadSHA(ctx)
 		if headErr != nil {
 			return fmt.Errorf("run: get head sha for init: %w", headErr)
@@ -95,7 +100,7 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	}
 
 	// 2. Fetch repo.
-	uc.log.InfoContext(ctx, "run: fetching repository")
+	log.InfoContext(ctx, "run: fetching repository")
 	if err := uc.repo.Fetch(ctx); err != nil {
 		return fmt.Errorf("run: fetch repo: %w", err)
 	}
@@ -106,23 +111,23 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 		return fmt.Errorf("run: get head sha: %w", err)
 	}
 	if headSHA == runState.LastProcessedSHA {
-		uc.log.InfoContext(ctx, "run: no new commits since last run")
+		log.InfoContext(ctx, "run: no new commits since last run")
 		return nil
 	}
 
 	// 4. Check for open bot MRs.
-	uc.log.InfoContext(ctx, "run: checking for open bot MRs")
+	log.InfoContext(ctx, "run: checking for open bot MRs")
 	openMRs, err := uc.mrCreator.OpenBotMRs(ctx)
 	if err != nil {
 		return fmt.Errorf("run: check open bot mrs: %w", err)
 	}
 	if len(openMRs) > 0 {
-		uc.log.WarnContext(ctx, "run: open bot MR already exists, skipping", "count", len(openMRs))
+		log.WarnContext(ctx, "run: open bot MR already exists, skipping", "count", len(openMRs))
 		return domain.ErrOpenMRExists
 	}
 
 	// 5. Diff from last processed SHA to HEAD.
-	uc.log.InfoContext(ctx, "run: computing diff", "from", runState.LastProcessedSHA, "to", headSHA)
+	log.InfoContext(ctx, "run: computing diff", "from", runState.LastProcessedSHA, "to", headSHA)
 	start := time.Now()
 	diffs, err := uc.repo.Diff(ctx, runState.LastProcessedSHA, headSHA)
 	if err != nil {
@@ -132,20 +137,20 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	for _, d := range diffs {
 		totalDiffBytes += len(d.Patch)
 	}
-	uc.log.InfoContext(ctx, "run: diff computed", "duration_ms", time.Since(start).Milliseconds(), "files", len(diffs), "total_bytes", totalDiffBytes)
+	log.InfoContext(ctx, "run: diff computed", "duration_ms", time.Since(start).Milliseconds(), "files", len(diffs), "total_bytes", totalDiffBytes)
 
 	// 6. Analyze changes.
-	uc.log.InfoContext(ctx, "run: analyzing changes", "diff_count", len(diffs))
+	log.InfoContext(ctx, "run: analyzing changes", "diff_count", len(diffs))
 	start = time.Now()
 	changes, err := uc.analyzer.Analyze(ctx, diffs)
 	if err != nil {
 		return fmt.Errorf("run: analyze changes: %w", err)
 	}
-	uc.log.InfoContext(ctx, "run: changes analyzed", "duration_ms", time.Since(start).Milliseconds(), "changes", len(changes))
+	log.InfoContext(ctx, "run: changes analyzed", "duration_ms", time.Since(start).Milliseconds(), "changes", len(changes))
 
 	// 7. If no relevant changes, update state and return.
 	if len(changes) == 0 {
-		uc.log.InfoContext(ctx, "run: no relevant changes, updating state")
+		log.InfoContext(ctx, "run: no relevant changes, updating state")
 		runState.LastProcessedSHA = headSHA
 		runState.LastRunAt = time.Now()
 		runState.Status = domain.RunStatusSkipped
@@ -156,7 +161,7 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	}
 
 	// 8. Map to doc paths.
-	uc.log.InfoContext(ctx, "run: mapping changes to documents")
+	log.InfoContext(ctx, "run: mapping changes to documents")
 	docPaths, err := uc.mapper.MapToDocs(ctx, changes)
 	if err != nil {
 		return fmt.Errorf("run: map to docs: %w", err)
@@ -167,7 +172,7 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	// duplicate MR creation when the same commits are re-evaluated).
 	ctxHash := computeContextHash(changes, docPaths)
 	if ctxHash == runState.ContextHash {
-		uc.log.InfoContext(ctx, "run: context hash unchanged, nothing new to process")
+		log.InfoContext(ctx, "run: context hash unchanged, nothing new to process")
 		return nil
 	}
 
@@ -179,13 +184,13 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 			return fmt.Errorf("run: read document %q: %w", docPath, err)
 		}
 
-		uc.log.InfoContext(ctx, "run: calling ACP", "doc", docPath)
+		log.InfoContext(ctx, "run: calling ACP", "doc", docPath)
 		start = time.Now()
 		acpResp, err := uc.generateWithChunking(ctx, changes, *current)
 		if err != nil {
 			return fmt.Errorf("run: acp generate for %q: %w", docPath, err)
 		}
-		uc.log.InfoContext(ctx, "run: ACP call completed", "duration_ms", time.Since(start).Milliseconds(), "files", len(acpResp.Files))
+		log.InfoContext(ctx, "run: ACP call completed", "duration_ms", time.Since(start).Milliseconds(), "files", len(acpResp.Files))
 
 		for _, acpFile := range acpResp.Files {
 			if acpFile.Path != docPath {
@@ -197,17 +202,17 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 			content := acpFile.Content
 			if acpFile.Action != "create" && current.Content != "" {
 				content = markdown.PatchDocument(current.Content, acpFile.Content)
-				uc.log.InfoContext(ctx, "run: applied section-aware patch", slog.String("doc", docPath))
+				log.InfoContext(ctx, "run: applied section-aware patch", slog.String("doc", docPath))
 			}
 
 			updated := domain.Document{Path: acpFile.Path, Content: content}
 
 			start = time.Now()
 			if err := uc.validator.Validate(ctx, *current, updated); err != nil {
-				uc.log.WarnContext(ctx, "run: validation failed, skipping doc", "doc", docPath, "error", err)
+				log.WarnContext(ctx, "run: validation failed, skipping doc", "doc", docPath, "error", err)
 				continue
 			}
-			uc.log.InfoContext(ctx, "run: validation passed", "duration_ms", time.Since(start).Milliseconds(), "doc", docPath)
+			log.InfoContext(ctx, "run: validation passed", "duration_ms", time.Since(start).Milliseconds(), "doc", docPath)
 
 			if !uc.dryRun {
 				if err := uc.docWriter.WriteDocument(ctx, updated); err != nil {
@@ -220,7 +225,7 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 
 	// 10. If no docs were written, nothing meaningful changed.
 	if len(updatedDocs) == 0 {
-		uc.log.InfoContext(ctx, "run: no meaningful document changes")
+		log.InfoContext(ctx, "run: no meaningful document changes")
 		runState.LastProcessedSHA = headSHA
 		runState.LastRunAt = time.Now()
 		runState.Status = domain.RunStatusSkipped
@@ -238,7 +243,7 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	var mrID string
 	if !uc.dryRun {
 		branchName := fmt.Sprintf("%s%d", uc.gitCfg.BranchPrefix, time.Now().Unix())
-		uc.log.InfoContext(ctx, "run: creating branch", "branch", branchName)
+		log.InfoContext(ctx, "run: creating branch", "branch", branchName)
 
 		if err := uc.mrCreator.CreateBranch(ctx, branchName); err != nil {
 			return fmt.Errorf("run: create branch: %w", err)
@@ -254,11 +259,12 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 			Description: buildMRDescription(updatedDocs),
 			Branch:      branchName,
 		}
-		mrID, err = uc.mrCreator.CreateMR(ctx, mr)
+		createdMR, err := uc.mrCreator.CreateMR(ctx, mr)
 		if err != nil {
 			return fmt.Errorf("run: create mr: %w", err)
 		}
-		uc.log.InfoContext(ctx, "run: merge request created", "mr_id", mrID)
+		mrID = createdMR.ID
+		log.InfoContext(ctx, "run: merge request created", "mr_id", mrID, "mr_url", createdMR.URL)
 
 		if uc.metrics != nil {
 			uc.metrics.MRCreatedTotal.Inc()

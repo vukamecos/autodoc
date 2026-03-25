@@ -328,12 +328,15 @@ func TestCreateMR(t *testing.T) {
 		Description: "automated update",
 		Branch:      "bot/docs-update/1",
 	}
-	id, err := a.CreateMR(ctx, mr)
+	created, err := a.CreateMR(ctx, mr)
 	if err != nil {
 		t.Fatalf("CreateMR() error: %v", err)
 	}
-	if id != "7" {
-		t.Errorf("expected id '7', got %q", id)
+	if created.ID != "7" {
+		t.Errorf("expected id '7', got %q", created.ID)
+	}
+	if created.URL != "https://gitlab.example.com/mr/7" {
+		t.Errorf("expected url 'https://gitlab.example.com/mr/7', got %q", created.URL)
 	}
 }
 
@@ -566,15 +569,15 @@ func TestFullWorkflow_CreateBranchCommitAndMR(t *testing.T) {
 		Description: "Automated update",
 		Branch:      "bot/docs-update/123",
 	}
-	mrID, err := a.CreateMR(ctx, mr)
+	createdMR, err := a.CreateMR(ctx, mr)
 	if err != nil {
 		t.Fatalf("CreateMR() error: %v", err)
 	}
 	if !mrCalled {
 		t.Error("expected MR endpoint to be called")
 	}
-	if mrID != "42" {
-		t.Errorf("expected MR ID 42, got %q", mrID)
+	if createdMR.ID != "42" {
+		t.Errorf("expected MR ID 42, got %q", createdMR.ID)
 	}
 }
 
@@ -723,13 +726,13 @@ func TestCreateMR_WithSpecialCharacters(t *testing.T) {
 		Branch:      "bot/docs-update/" + fmt.Sprintf("%d", time.Now().Unix()),
 	}
 	
-	id, err := a.CreateMR(ctx, mr)
+	created, err := a.CreateMR(ctx, mr)
 	if err != nil {
 		t.Fatalf("CreateMR() error: %v", err)
 	}
-	
-	if id != "99" {
-		t.Errorf("expected id 99, got %q", id)
+
+	if created.ID != "99" {
+		t.Errorf("expected id 99, got %q", created.ID)
 	}
 	
 	if capturedBody["title"] != mr.Title {

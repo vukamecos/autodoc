@@ -27,16 +27,23 @@ import (
 	"github.com/vukamecos/autodoc/internal/validation"
 )
 
+// circuitResetter is satisfied by ACP and Ollama clients that expose a circuit
+// breaker reset, enabling the POST /admin/reset-circuit admin endpoint.
+type circuitResetter interface {
+	ResetCircuit()
+}
+
 // App wires all dependencies and manages the application lifecycle.
 type App struct {
-	cfg       *config.Config
-	scheduler *scheduler.Scheduler
-	store     *storage.Store
-	metrics   *observability.Metrics
-	log       *slog.Logger
-	httpSrv   *http.Server
-	pprofSrv  *http.Server // nil when pprof is disabled
-	useCase   *usecase.RunDocUpdateUseCase
+	cfg             *config.Config
+	scheduler       *scheduler.Scheduler
+	store           *storage.Store
+	metrics         *observability.Metrics
+	log             *slog.Logger
+	httpSrv         *http.Server
+	pprofSrv        *http.Server // nil when pprof is disabled
+	useCase         *usecase.RunDocUpdateUseCase
+	circuitResetter circuitResetter // nil when circuit breaker is disabled
 }
 
 // New constructs all adapters, the use case, and registers the cron job.
@@ -85,6 +92,12 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		return nil, fmt.Errorf("app: register cron job: %w", err)
 	}
 
+	// Optionally expose circuit-breaker reset via the admin endpoint.
+	var resetter circuitResetter
+	if cr, ok := acpClient.(circuitResetter); ok {
+		resetter = cr
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -109,6 +122,37 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 	})
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 
+	// Admin endpoints.
+	mux.HandleFunc("/admin/reset-circuit", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if resetter == nil {
+			http.Error(w, `{"error":"circuit breaker not enabled"}`, http.StatusServiceUnavailable)
+			return
+		}
+		resetter.ResetCircuit()
+		log.Info("app: circuit breaker reset via admin endpoint")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "reset"})
+	})
+	mux.HandleFunc("/admin/trigger-run", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		go func() {
+			log.Info("app: manual run triggered via admin endpoint")
+			if err := uc.Run(context.Background()); err != nil {
+				log.Error("app: admin-triggered run failed", "error", err)
+			}
+		}()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "triggered"})
+	})
+
 	httpSrv := &http.Server{
 		Addr:    ":8080",
 		Handler: mux,
@@ -120,14 +164,15 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 	}
 
 	return &App{
-		cfg:       cfg,
-		scheduler: sched,
-		store:     store,
-		metrics:   metrics,
-		log:       log,
-		httpSrv:   httpSrv,
-		pprofSrv:  pprofSrv,
-		useCase:   uc,
+		cfg:             cfg,
+		scheduler:       sched,
+		store:           store,
+		metrics:         metrics,
+		log:             log,
+		httpSrv:         httpSrv,
+		pprofSrv:        pprofSrv,
+		useCase:         uc,
+		circuitResetter: resetter,
 	}, nil
 }
 
@@ -249,9 +294,7 @@ func newACPAdapter(cfg *config.Config, log *slog.Logger, metrics *observability.
 	case "acp", "":
 		return acp.New(cfg.ACP, log, metrics), nil
 	case "ollama":
-		if cfg.ACP.Model == "" {
-			return nil, fmt.Errorf("app: acp.model is required when provider is \"ollama\"")
-		}
+		// acp.model may be empty; auto-selection happens per-request in the chunker.
 		return ollamaadapter.New(cfg.ACP, log, metrics), nil
 	default:
 		return nil, fmt.Errorf("app: unknown acp provider %q (supported: acp, ollama)", cfg.ACP.Provider)
@@ -270,13 +313,17 @@ func (a *App) Shutdown(ctx context.Context) error {
 	}
 
 	if a.httpSrv != nil {
-		if err := a.httpSrv.Shutdown(ctx); err != nil {
+		httpCtx, httpCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer httpCancel()
+		if err := a.httpSrv.Shutdown(httpCtx); err != nil {
 			return fmt.Errorf("app: http shutdown: %w", err)
 		}
 	}
 
 	if a.pprofSrv != nil {
-		if err := a.pprofSrv.Shutdown(ctx); err != nil {
+		pprofCtx, pprofCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer pprofCancel()
+		if err := a.pprofSrv.Shutdown(pprofCtx); err != nil {
 			return fmt.Errorf("app: pprof shutdown: %w", err)
 		}
 	}

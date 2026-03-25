@@ -25,9 +25,8 @@ func (cfg *Config) Validate() error {
 	if cfg.ACP.Provider != "" && cfg.ACP.Provider != "acp" && cfg.ACP.Provider != "ollama" {
 		errors = append(errors, fmt.Sprintf("acp.provider must be 'acp' or 'ollama', got %q", cfg.ACP.Provider))
 	}
-	if cfg.ACP.Provider == "ollama" && cfg.ACP.Model == "" {
-		errors = append(errors, "acp.model is required when provider is 'ollama'")
-	}
+	// acp.model is optional for ollama — when empty, the model is auto-selected
+	// per request based on diff size (see usecase.ModelSelector).
 	if cfg.ACP.MaxContextBytes <= 0 {
 		errors = append(errors, fmt.Sprintf("acp.max_context_bytes must be positive, got %d", cfg.ACP.MaxContextBytes))
 	}

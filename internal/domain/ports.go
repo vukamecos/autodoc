@@ -11,7 +11,7 @@ type RepositoryPort interface {
 type MRCreatorPort interface {
 	CreateBranch(ctx context.Context, name string) error
 	CommitFiles(ctx context.Context, branch string, docs []Document, message string) error
-	CreateMR(ctx context.Context, mr MergeRequest) (string, error)
+	CreateMR(ctx context.Context, mr MergeRequest) (MergeRequest, error)
 	OpenBotMRs(ctx context.Context) ([]MergeRequest, error)
 }
 

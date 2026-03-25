@@ -152,8 +152,13 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 	start := time.Now()
 	userMsg := buildUserMessage(req)
 
+	model := c.model
+	if req.Model != "" {
+		model = req.Model
+	}
+
 	ollamaReq := chatRequest{
-		Model: c.model,
+		Model: model,
 		Messages: []chatMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userMsg},
@@ -168,7 +173,7 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 	}
 
 	c.log.InfoContext(ctx, "ollama: sending request",
-		slog.String("model", c.model),
+		slog.String("model", model),
 		slog.String("correlation_id", req.CorrelationID),
 		slog.Int("prompt_bytes", len(userMsg)),
 	)
@@ -252,6 +257,14 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 		slog.String("summary", truncate(result.Summary, 120)),
 	)
 	return result, nil
+}
+
+// ResetCircuit forces the circuit breaker back to closed state.
+// Used by the admin /admin/reset-circuit endpoint.
+func (c *Client) ResetCircuit() {
+	if c.circuitBreaker != nil {
+		c.circuitBreaker.Reset()
+	}
 }
 
 // buildUserMessage assembles the user prompt from the ACPRequest fields.

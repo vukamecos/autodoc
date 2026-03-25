@@ -178,7 +178,7 @@ func (a *Adapter) CommitFiles(ctx context.Context, branch string, docs []domain.
 }
 
 // CreateMR opens a merge request and returns its IID as a string.
-func (a *Adapter) CreateMR(ctx context.Context, mr domain.MergeRequest) (string, error) {
+func (a *Adapter) CreateMR(ctx context.Context, mr domain.MergeRequest) (domain.MergeRequest, error) {
 	body := map[string]any{
 		"source_branch": mr.Branch,
 		"target_branch": a.branch,
@@ -193,13 +193,17 @@ func (a *Adapter) CreateMR(ctx context.Context, mr domain.MergeRequest) (string,
 	}
 	path := fmt.Sprintf("/projects/%s/merge_requests", a.projectID)
 	if err := a.post(ctx, path, body, &resp); err != nil {
-		return "", fmt.Errorf("gitlab create mr: %w", err)
+		return domain.MergeRequest{}, fmt.Errorf("gitlab create mr: %w", err)
+	}
+	created := domain.MergeRequest{
+		ID:  fmt.Sprintf("%d", resp.IID),
+		URL: resp.URL,
 	}
 	a.log.InfoContext(ctx, "gitlab: MR created",
 		slog.Int("iid", resp.IID),
 		slog.String("url", resp.URL),
 	)
-	return fmt.Sprintf("%d", resp.IID), nil
+	return created, nil
 }
 
 // OpenBotMRs returns all open MRs that carry the bot label.

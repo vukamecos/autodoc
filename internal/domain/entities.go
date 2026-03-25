@@ -81,6 +81,9 @@ type ACPRequest struct {
 	ChangeSummary string
 	Diff          string
 	Documents     []Document
+	// Model overrides the client's configured model for this specific request.
+	// Used by the auto-selector to pick the best model based on diff size.
+	Model string
 }
 
 type ACPResponse struct {
