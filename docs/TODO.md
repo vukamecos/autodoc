@@ -23,19 +23,23 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] Prometheus metrics
 
 ### Testing (79+ tests)
-| Package | Tests |
-|---------|-------|
-| `adapters/acp` | 9 |
-| `adapters/fs` | 15 |
-| `adapters/github` | 16 |
-| `adapters/gitlab` | 24 (9 integration) |
-| `adapters/ollama` | 6 |
-| `adapters/storage` | 6 |
-| `circuitbreaker` | 13 |
-| `markdown` | 9 |
-| `retry` | 2 |
-| `usecase` | 25+ |
-| `validation` | 16+ |
+| Package | Tests | Coverage |
+|---------|-------|----------|
+| `adapters/acp` | 9 | 67.7% |
+| `adapters/fs` | 15 | 73.0% |
+| `adapters/github` | 16 | 89.2% |
+| `adapters/gitlab` | 24 (9 integration) | 92.2% |
+| `adapters/ollama` | 6 | 67.7% |
+| `adapters/storage` | 6 | 73.1% |
+| `circuitbreaker` | 13 | 94.1% |
+| `markdown` | 9 | 95.8% |
+| `retry` | 2 | 81.8% |
+| `usecase` | 25+ | 37.6% |
+| `validation` | 16+ | 92.0% |
+| `config` | 0 | 0% ⚠️ |
+| `app` | 0 | 0% ⚠️ |
+| `scheduler` | 0 | 0% ⚠️ |
+| `observability` | 0 | 0% ⚠️ |
 
 ### Fixes Applied
 - [x] Dry-run mode wired correctly
@@ -53,12 +57,23 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] Integration tests for GitLab adapter (similar to unit tests) — added 9 new integration tests
 - [x] More unit tests for `usecase` package (currently basic coverage) — added 20+ new tests
 - [ ] End-to-end test with real GitLab/GitHub (test repo)
+- [ ] Unit tests for `internal/config` — config loading, env var overrides, validation
+- [ ] Unit tests for `internal/app` — dependency wiring, app lifecycle
+- [ ] Unit tests for `internal/scheduler` — cron scheduling, job registration
+- [ ] Unit tests for `internal/observability` — logger creation, metrics registration
 
 ### Observability
 - [x] Metric: `autodoc_validation_failures_total{check}` — count by check type (allowed_path, not_empty, etc.)
 - [x] Metric: `autodoc_chunked_requests_total` — how often chunking triggers
 - [x] Health check endpoint `/healthz/ready` for ACP/Ollama connectivity
 - [ ] Log MR/PR URL after creation
+- [ ] OpenTelemetry tracing — distributed traces across ACP calls
+- [ ] Structured logging with request IDs — correlation IDs throughout pipeline
+
+### Documentation
+- [ ] Package-level documentation comments — `doc.go` files for each package
+- [ ] Architecture Decision Records (ADRs) — document key architectural choices
+- [ ] API documentation for admin endpoints — when implemented
 
 ### Features
 - [x] Config validation on startup (fail fast on invalid config) — validates required fields, types, and relationships
@@ -66,11 +81,14 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] Automatic model selection based on diff size — selects qwen3:4b/8b/14b/32b based on diff bytes
 - [ ] Update existing bot MR/PR instead of skipping
 - [ ] Retry failed ACP calls with exponential backoff (different model?)
+- [ ] Config hot-reload — watch config file and reload without restart
+- [ ] Admin API endpoints — `POST /admin/reset-circuit`, `POST /admin/trigger-run`
 
 ### Reliability
 - [x] Circuit breaker for ACP/Ollama calls — implemented with 3 states, metrics, 13 tests
 - [ ] Graceful degradation when ACP is unavailable (queue for retry)
 - [ ] Backpressure when too many changes
+- [ ] Graceful shutdown with request draining — currently immediate shutdown
 
 ---
 
