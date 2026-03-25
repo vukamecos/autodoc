@@ -26,19 +26,23 @@ func New(cfg config.ValidationConfig, doc config.DocumentationConfig, log *slog.
 // Validate runs all configured checks against an updated Document.
 // Checks are applied in order; the first failure is returned.
 func (v *Validator) Validate(ctx context.Context, original, updated domain.Document) error {
-	checks := []func() error{
-		func() error { return v.checkAllowedPath(updated.Path) },
-		func() error { return v.checkNotEmpty(updated) },
-		func() error { return v.checkForbidNonDoc(updated.Path) },
-		func() error { return v.checkRequiredSections(updated) },
-		func() error { return v.checkContentShrink(original, updated) },
-		func() error { return v.checkMarkdownLint(updated) },
+	checks := []struct {
+		name string
+		fn   func() error
+	}{
+		{"allowed_path", func() error { return v.checkAllowedPath(updated.Path) }},
+		{"not_empty", func() error { return v.checkNotEmpty(updated) }},
+		{"forbid_non_doc", func() error { return v.checkForbidNonDoc(updated.Path) }},
+		{"required_sections", func() error { return v.checkRequiredSections(updated) }},
+		{"content_shrink", func() error { return v.checkContentShrink(original, updated) }},
+		{"markdown_lint", func() error { return v.checkMarkdownLint(updated) }},
 	}
 
 	for _, check := range checks {
-		if err := check(); err != nil {
+		if err := check.fn(); err != nil {
 			v.log.WarnContext(ctx, "validation failed",
 				slog.String("doc", updated.Path),
+				slog.String("check", check.name),
 				slog.String("error", err.Error()),
 			)
 			return err
@@ -54,7 +58,7 @@ func (v *Validator) Validate(ctx context.Context, original, updated domain.Docum
 // checkAllowedPath verifies the path matches an allowed-paths glob.
 func (v *Validator) checkAllowedPath(path string) error {
 	if !v.isAllowed(path) {
-		return fmt.Errorf("validation: %w: %s", domain.ErrForbiddenPath, path)
+		return fmt.Errorf("path %q not in allowed paths %v", path, v.doc.AllowedPaths)
 	}
 	return nil
 }
@@ -62,7 +66,7 @@ func (v *Validator) checkAllowedPath(path string) error {
 // checkNotEmpty ensures the updated document is not blank.
 func (v *Validator) checkNotEmpty(doc domain.Document) error {
 	if strings.TrimSpace(doc.Content) == "" {
-		return fmt.Errorf("validation: %w: %s", domain.ErrEmptyDocument, doc.Path)
+		return fmt.Errorf("document %s has empty content", doc.Path)
 	}
 	return nil
 }
@@ -74,7 +78,7 @@ func (v *Validator) checkForbidNonDoc(path string) error {
 		return nil
 	}
 	if !strings.HasPrefix(path, "docs/") && !strings.EqualFold(filepath.Base(path), "readme.md") {
-		return fmt.Errorf("validation: %w: %s is not a documentation path", domain.ErrForbiddenPath, path)
+		return fmt.Errorf("path %q is not a documentation path (ForbidNonDocChanges enabled)", path)
 	}
 	return nil
 }
@@ -90,8 +94,7 @@ func (v *Validator) checkRequiredSections(doc domain.Document) error {
 		}
 		for _, section := range sections {
 			if !strings.Contains(doc.Content, section) {
-				return fmt.Errorf("validation: %w: section %q missing in %s",
-					domain.ErrMissingSections, section, doc.Path)
+				return fmt.Errorf("required section %q missing in %s (config key: %s)", section, doc.Path, key)
 			}
 		}
 	}
@@ -107,9 +110,10 @@ func (v *Validator) checkContentShrink(original, updated domain.Document) error 
 	}
 	threshold := int(float64(len(original.Content)) * ratio)
 	if len(updated.Content) < threshold {
+		actualRatio := float64(len(updated.Content)) / float64(len(original.Content))
 		return fmt.Errorf(
-			"validation: content shrank too much in %s: updated=%d bytes, original=%d bytes, min_ratio=%.2f",
-			updated.Path, len(updated.Content), len(original.Content), ratio,
+			"content shrank from %d to %d bytes (ratio %.2f, min %.2f) in %s",
+			len(original.Content), len(updated.Content), actualRatio, ratio, updated.Path,
 		)
 	}
 	return nil
@@ -122,7 +126,7 @@ func (v *Validator) checkMarkdownLint(doc domain.Document) error {
 		return nil
 	}
 	if err := lintMarkdown(doc.Path, doc.Content); err != nil {
-		return fmt.Errorf("validation: markdown lint %s: %w", doc.Path, err)
+		return fmt.Errorf("markdown lint: %w", err)
 	}
 	return nil
 }

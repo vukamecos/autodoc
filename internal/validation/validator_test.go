@@ -2,7 +2,6 @@ package validation
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -126,8 +125,8 @@ func TestCheckRequiredSections_Missing(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing required section")
 	}
-	if !errors.Is(err, domain.ErrMissingSections) {
-		t.Errorf("expected ErrMissingSections, got: %v", err)
+	if !strings.Contains(err.Error(), "section \"## Running\" missing") {
+		t.Errorf("expected error mentioning missing section, got: %v", err)
 	}
 }
 
@@ -270,7 +269,8 @@ func TestValidate_ShortCircuitsOnFirstFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
-	if !errors.Is(err, domain.ErrForbiddenPath) {
-		t.Errorf("expected ErrForbiddenPath as first failure, got: %v", err)
+	// First check is allowed_path, should fail with path not allowed
+	if !strings.Contains(err.Error(), "not in allowed paths") {
+		t.Errorf("expected 'not in allowed paths' error as first failure, got: %v", err)
 	}
 }
