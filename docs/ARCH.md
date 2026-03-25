@@ -79,12 +79,44 @@ Implement domain interfaces. Each adapter is isolated in its own package.
 | `adapters/ollama` | `ACPClientPort` | Ollama `/api/chat` endpoint |
 | `adapters/storage` | `StateStorePort` | SQLite |
 | `adapters/fs` | `DocumentStorePort`, `DocumentWriterPort` | os, filepath |
+| `circuitbreaker` | Resilience pattern | internal |
+| `retry` | HTTP retry with backoff | internal |
 
 ---
 
 ### App (`internal/app`)
 
 Wires dependencies (manual DI or via wire). Starts the scheduler, configures observability.
+
+---
+
+## Resilience Patterns
+
+### Circuit Breaker
+
+The circuit breaker pattern prevents cascading failures when the LLM service (ACP or Ollama) becomes unavailable.
+
+**States:**
+- **Closed** — Requests pass through normally
+- **Open** — Requests fail fast without calling the service (after `FailureThreshold` consecutive failures)
+- **Half-Open** — Allows test requests to check if service recovered (after `Timeout`)
+
+**Configuration** (`autodoc.yaml`):
+```yaml
+acp:
+  circuit_breaker_enabled: true       # default: true
+  circuit_breaker_threshold: 5        # consecutive failures to open
+  circuit_breaker_timeout: 30s        # time before half-open
+```
+
+**Integration:**
+- ACP and Ollama clients wrap their `Generate()` calls with the circuit breaker
+- Metrics are recorded with status label `circuit_open` when circuit is open
+- State transitions are logged at WARN level
+
+**Recovery:**
+- After `SuccessThreshold` (default: 2) consecutive successes in half-open state, the circuit closes
+- Manual reset via admin endpoint or process restart
 
 ---
 

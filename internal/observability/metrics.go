@@ -11,6 +11,7 @@ type Metrics struct {
 	ACPRequestDuration     prometheus.Histogram
 	ValidationFailuresTotal *prometheus.CounterVec
 	ChunkedRequestsTotal   prometheus.Counter
+	CircuitBreakerState    *prometheus.GaugeVec
 }
 
 // NewMetrics creates and registers all metrics with reg.
@@ -51,6 +52,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "autodoc_chunked_requests_total",
 			Help: "Total number of requests that required chunking (diff exceeded context limit).",
 		}),
+
+		CircuitBreakerState: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "autodoc_circuit_breaker_state",
+			Help: "Current state of the circuit breaker (0=closed, 1=half-open, 2=open).",
+		}, []string{"component"}),
 	}
 
 	reg.MustRegister(
@@ -61,6 +67,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.ACPRequestDuration,
 		m.ValidationFailuresTotal,
 		m.ChunkedRequestsTotal,
+		m.CircuitBreakerState,
 	)
 
 	return m

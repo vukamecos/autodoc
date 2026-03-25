@@ -55,15 +55,18 @@ type MappingConfig struct {
 }
 
 type ACPConfig struct {
-	Provider        string        `yaml:"provider"`          // "acp" (default) or "ollama"
-	Model           string        `yaml:"model"`             // Ollama model name (e.g. "llama3.1")
-	BaseURL         string        `yaml:"base_url"`
-	Token           string        `yaml:"token"`
-	Timeout         time.Duration `yaml:"timeout"`
-	MaxContextBytes int           `yaml:"max_context_bytes"`
-	Mode            string        `yaml:"mode"`
-	MaxRetries      int           `yaml:"max_retries"`
-	RetryDelay      time.Duration `yaml:"retry_delay"`
+	Provider               string        `yaml:"provider"`                 // "acp" (default) or "ollama"
+	Model                  string        `yaml:"model"`                    // Ollama model name (e.g. "llama3.1")
+	BaseURL                string        `yaml:"base_url"`
+	Token                  string        `yaml:"token"`
+	Timeout                time.Duration `yaml:"timeout"`
+	MaxContextBytes        int           `yaml:"max_context_bytes"`
+	Mode                   string        `yaml:"mode"`
+	MaxRetries             int           `yaml:"max_retries"`
+	RetryDelay             time.Duration `yaml:"retry_delay"`
+	CircuitBreakerEnabled  bool          `yaml:"circuit_breaker_enabled"`  // default: true
+	CircuitBreakerThreshold uint32       `yaml:"circuit_breaker_threshold"` // consecutive failures to open, default: 5
+	CircuitBreakerTimeout  time.Duration `yaml:"circuit_breaker_timeout"`   // time before half-open, default: 30s
 }
 
 type GitConfig struct {
@@ -133,6 +136,9 @@ func applyDefaults(cfg *Config) {
 	cfg.ACP.MaxContextBytes = 500000
 	cfg.ACP.MaxRetries = 3
 	cfg.ACP.RetryDelay = time.Second
+	cfg.ACP.CircuitBreakerEnabled = true
+	cfg.ACP.CircuitBreakerThreshold = 5
+	cfg.ACP.CircuitBreakerTimeout = 30 * time.Second
 	cfg.Repository.DefaultBranch = "main"
 	cfg.Repository.MaxRetries = 3
 	cfg.Repository.RetryDelay = time.Second

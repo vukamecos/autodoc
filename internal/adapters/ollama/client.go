@@ -7,12 +7,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/vukamecos/autodoc/internal/circuitbreaker"
 	"github.com/vukamecos/autodoc/internal/config"
 	"github.com/vukamecos/autodoc/internal/domain"
 	"github.com/vukamecos/autodoc/internal/observability"
@@ -45,12 +47,13 @@ Rules:
 
 // Client implements domain.ACPClientPort via the Ollama /api/chat endpoint.
 type Client struct {
-	httpClient *http.Client
-	baseURL    string // e.g. http://localhost:11434
-	model      string
-	retryOpts  retry.Options
-	log        *slog.Logger
-	metrics    *observability.Metrics
+	httpClient     *http.Client
+	baseURL        string // e.g. http://localhost:11434
+	model          string
+	retryOpts      retry.Options
+	log            *slog.Logger
+	metrics        *observability.Metrics
+	circuitBreaker *circuitbreaker.CircuitBreaker
 }
 
 // New constructs an Ollama Client.
@@ -59,13 +62,52 @@ func New(cfg config.ACPConfig, log *slog.Logger, metrics *observability.Metrics)
 	if base == "" {
 		base = "http://localhost:11434"
 	}
+
+	var cb *circuitbreaker.CircuitBreaker
+	if cfg.CircuitBreakerEnabled {
+		cbConfig := circuitbreaker.Config{
+			FailureThreshold: cfg.CircuitBreakerThreshold,
+			SuccessThreshold: 2,
+			Timeout:          cfg.CircuitBreakerTimeout,
+		}
+		cb = circuitbreaker.NewWithCallback(cbConfig, func(from, to circuitbreaker.State) {
+			log.Warn("circuit breaker state changed",
+				slog.String("from", from.String()),
+				slog.String("to", to.String()),
+				slog.String("component", "ollama_client"),
+			)
+			if metrics != nil {
+				metrics.CircuitBreakerState.WithLabelValues("ollama").Set(stateToFloat(to))
+			}
+		})
+		// Set initial state
+		if metrics != nil {
+			metrics.CircuitBreakerState.WithLabelValues("ollama").Set(0)
+		}
+	}
+
 	return &Client{
-		httpClient: &http.Client{Timeout: cfg.Timeout},
-		baseURL:    strings.TrimRight(base, "/"),
-		model:      cfg.Model,
-		retryOpts:  retry.Options{MaxRetries: cfg.MaxRetries, RetryDelay: cfg.RetryDelay},
-		log:        log,
-		metrics:    metrics,
+		httpClient:     &http.Client{Timeout: cfg.Timeout},
+		baseURL:        strings.TrimRight(base, "/"),
+		model:          cfg.Model,
+		retryOpts:      retry.Options{MaxRetries: cfg.MaxRetries, RetryDelay: cfg.RetryDelay},
+		log:            log,
+		metrics:        metrics,
+		circuitBreaker: cb,
+	}
+}
+
+// stateToFloat converts circuit breaker state to float for metrics (0=closed, 1=half-open, 2=open).
+func stateToFloat(s circuitbreaker.State) float64 {
+	switch s {
+	case circuitbreaker.StateClosed:
+		return 0
+	case circuitbreaker.StateHalfOpen:
+		return 1
+	case circuitbreaker.StateOpen:
+		return 2
+	default:
+		return 0
 	}
 }
 
@@ -92,6 +134,21 @@ type chatResponse struct {
 
 // Generate sends the ACPRequest to Ollama and returns the parsed ACPResponse.
 func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.ACPResponse, error) {
+	// Circuit breaker check
+	if c.circuitBreaker != nil {
+		state, failures, _, _ := c.circuitBreaker.Stats()
+		if state == circuitbreaker.StateOpen {
+			c.log.WarnContext(ctx, "ollama: circuit breaker is open, rejecting request",
+				slog.String("correlation_id", req.CorrelationID),
+				slog.Uint64("consecutive_failures", uint64(failures)),
+			)
+			if c.metrics != nil {
+				c.metrics.ACPRequestsTotal.WithLabelValues("circuit_open").Inc()
+			}
+			return nil, fmt.Errorf("ollama: %w", circuitbreaker.ErrOpenCircuit)
+		}
+	}
+
 	start := time.Now()
 	userMsg := buildUserMessage(req)
 
@@ -116,64 +173,72 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 		slog.Int("prompt_bytes", len(userMsg)),
 	)
 
-	makeReq := func() (*http.Request, error) {
-		r, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			c.baseURL+"/api/chat", bytes.NewReader(body))
+	var result *domain.ACPResponse
+	var execErr error
+
+	executeRequest := func() error {
+		makeReq := func() (*http.Request, error) {
+			r, err := http.NewRequestWithContext(ctx, http.MethodPost,
+				c.baseURL+"/api/chat", bytes.NewReader(body))
+			if err != nil {
+				return nil, err
+			}
+			r.Header.Set("Content-Type", "application/json")
+			return r, nil
+		}
+
+		resp, err := retry.Do(ctx, c.httpClient, c.retryOpts, makeReq)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("ollama: request failed: %w", err)
 		}
-		r.Header.Set("Content-Type", "application/json")
-		return r, nil
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("ollama: status %d: %w", resp.StatusCode, domain.ErrInvalidACPResponse)
+		}
+
+		var chatResp chatResponse
+		if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+			return fmt.Errorf("ollama: decode chat response: %w", err)
+		}
+
+		// Parse the model's JSON content into ACPResponse.
+		content := strings.TrimSpace(chatResp.Message.Content)
+		var acpResp domain.ACPResponse
+		if err := json.Unmarshal([]byte(content), &acpResp); err != nil {
+			c.log.WarnContext(ctx, "ollama: model output is not valid ACPResponse JSON",
+				slog.String("raw_content", truncate(content, 500)),
+				slog.String("error", err.Error()),
+			)
+			return fmt.Errorf("ollama: parse model output as ACPResponse: %w", domain.ErrInvalidACPResponse)
+		}
+
+		if acpResp.Summary == "" && len(acpResp.Files) == 0 {
+			return fmt.Errorf("ollama: response missing required fields: %w", domain.ErrInvalidACPResponse)
+		}
+
+		result = &acpResp
+		return nil
 	}
 
-	resp, err := retry.Do(ctx, c.httpClient, c.retryOpts, makeReq)
-	if err != nil {
-		if c.metrics != nil {
-			c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
-			c.metrics.ACPRequestsTotal.WithLabelValues("failed").Inc()
-		}
-		return nil, fmt.Errorf("ollama: request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if c.metrics != nil {
-			c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
-			c.metrics.ACPRequestsTotal.WithLabelValues("failed").Inc()
-		}
-		return nil, fmt.Errorf("ollama: status %d: %w", resp.StatusCode, domain.ErrInvalidACPResponse)
+	// Execute with circuit breaker if enabled
+	if c.circuitBreaker != nil {
+		execErr = c.circuitBreaker.Execute(ctx, executeRequest)
+	} else {
+		execErr = executeRequest()
 	}
 
-	var chatResp chatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+	// Record metrics and handle result
+	if execErr != nil {
 		if c.metrics != nil {
 			c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
-			c.metrics.ACPRequestsTotal.WithLabelValues("failed").Inc()
+			if errors.Is(execErr, circuitbreaker.ErrOpenCircuit) {
+				// Already counted above
+			} else {
+				c.metrics.ACPRequestsTotal.WithLabelValues("failed").Inc()
+			}
 		}
-		return nil, fmt.Errorf("ollama: decode chat response: %w", err)
-	}
-
-	// Parse the model's JSON content into ACPResponse.
-	content := strings.TrimSpace(chatResp.Message.Content)
-	var acpResp domain.ACPResponse
-	if err := json.Unmarshal([]byte(content), &acpResp); err != nil {
-		c.log.WarnContext(ctx, "ollama: model output is not valid ACPResponse JSON",
-			slog.String("raw_content", truncate(content, 500)),
-			slog.String("error", err.Error()),
-		)
-		if c.metrics != nil {
-			c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
-			c.metrics.ACPRequestsTotal.WithLabelValues("failed").Inc()
-		}
-		return nil, fmt.Errorf("ollama: parse model output as ACPResponse: %w", domain.ErrInvalidACPResponse)
-	}
-
-	if acpResp.Summary == "" && len(acpResp.Files) == 0 {
-		if c.metrics != nil {
-			c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
-			c.metrics.ACPRequestsTotal.WithLabelValues("failed").Inc()
-		}
-		return nil, fmt.Errorf("ollama: response missing required fields: %w", domain.ErrInvalidACPResponse)
+		return nil, execErr
 	}
 
 	if c.metrics != nil {
@@ -183,10 +248,10 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 
 	c.log.InfoContext(ctx, "ollama: received response",
 		slog.String("correlation_id", req.CorrelationID),
-		slog.Int("files", len(acpResp.Files)),
-		slog.String("summary", truncate(acpResp.Summary, 120)),
+		slog.Int("files", len(result.Files)),
+		slog.String("summary", truncate(result.Summary, 120)),
 	)
-	return &acpResp, nil
+	return result, nil
 }
 
 // buildUserMessage assembles the user prompt from the ACPRequest fields.

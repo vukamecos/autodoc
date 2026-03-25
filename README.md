@@ -140,6 +140,10 @@ acp:
   mode: structured_output             # Passed to the ACP agent as a hint (ignored by Ollama)
   max_retries: 3                      # Retries on transport errors / 5xx
   retry_delay: 1s                     # Base delay for exponential backoff
+  # Circuit breaker prevents cascading failures when LLM service is unavailable
+  circuit_breaker_enabled: true       # Enable circuit breaker (default: true)
+  circuit_breaker_threshold: 5        # Consecutive failures to open circuit (default: 5)
+  circuit_breaker_timeout: 30s        # Time before attempting recovery (default: 30s)
 
 # ---------------------------------------------------------------------------
 # Git branch / commit settings
@@ -273,6 +277,9 @@ Enable the pprof server by setting `observability.pprof_enabled: true` in the co
 | `autodoc_mr_created_total` | Counter | MRs/PRs opened |
 | `autodoc_acp_requests_total{status}` | Counter | ACP calls by outcome |
 | `autodoc_acp_request_duration_seconds` | Histogram | ACP request latency |
+| `autodoc_validation_failures_total{check}` | Counter | Validation failures by check type |
+| `autodoc_chunked_requests_total` | Counter | Requests that required chunking |
+| `autodoc_circuit_breaker_state{component}` | Gauge | Circuit breaker state (0=closed, 1=half-open, 2=open) |
 
 ## Development
 
