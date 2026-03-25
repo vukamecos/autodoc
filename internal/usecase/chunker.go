@@ -28,6 +28,17 @@ func (uc *RunDocUpdateUseCase) generateWithChunking(
 		totalBytes += len(c.Diff.Patch)
 	}
 
+	// Auto-select model based on diff size if using Ollama
+	if uc.acpCfg.Provider == "ollama" && uc.acpCfg.Model == "" {
+		selector := NewModelSelector(uc.acpCfg)
+		rec := selector.SelectModel(totalBytes)
+		uc.log.InfoContext(ctx, "model auto-selected", 
+			"model", rec.Model, 
+			"reason", rec.Reason,
+			"confidence", rec.Confidence,
+		)
+	}
+
 	if len(chunks) == 1 {
 		uc.log.InfoContext(ctx, "chunker: single chunk", "doc", current.Path, "budget", budget, "changes", totalChanges, "bytes", totalBytes)
 		req := buildACPRequest(chunks[0], current)
@@ -88,10 +99,11 @@ func (uc *RunDocUpdateUseCase) generateWithChunking(
 // overhead for instructions/metadata.
 func (uc *RunDocUpdateUseCase) diffBudget(docSize int) int {
 	const overhead = 2048
-	budget := uc.maxContextBytes - docSize - overhead
+	maxContext := uc.acpCfg.MaxContextBytes
+	budget := maxContext - docSize - overhead
 	if budget < overhead {
 		// Document alone is close to the limit; give at least some budget.
-		budget = uc.maxContextBytes / 4
+		budget = maxContext / 4
 	}
 	return budget
 }

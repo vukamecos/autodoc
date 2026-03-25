@@ -60,9 +60,9 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [ ] Log MR/PR URL after creation
 
 ### Features
-- [ ] Config validation on startup (fail fast on invalid config)
-- [ ] Support for multiple documentation languages
-- [ ] Automatic model selection based on diff size
+- [x] Config validation on startup (fail fast on invalid config) — validates required fields, types, and relationships
+- [x] Support for multiple documentation languages — `supported_languages` config with validation
+- [x] Automatic model selection based on diff size — selects qwen3:4b/8b/14b/32b based on diff bytes
 - [ ] Update existing bot MR/PR instead of skipping
 - [ ] Retry failed ACP calls with exponential backoff (different model?)
 

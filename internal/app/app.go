@@ -73,7 +73,7 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		mapper,
 		validator,
 		cfg.Git,
-		cfg.ACP.MaxContextBytes,
+		cfg.ACP,
 		dryRun,
 		log,
 		metrics,

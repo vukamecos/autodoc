@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vukamecos/autodoc/internal/config"
 	"github.com/vukamecos/autodoc/internal/domain"
 )
 
@@ -191,7 +192,7 @@ func makeChanges(patches ...string) []domain.AnalyzedChange {
 // ---------------------------------------------------------------------------
 
 func TestDiffBudget_NormalCase(t *testing.T) {
-	uc := &RunDocUpdateUseCase{maxContextBytes: 500000}
+	uc := &RunDocUpdateUseCase{acpCfg: config.ACPConfig{MaxContextBytes: 500000}}
 	
 	// Document size 10000, overhead 2048
 	// budget = 500000 - 10000 - 2048 = 487952
@@ -204,7 +205,7 @@ func TestDiffBudget_NormalCase(t *testing.T) {
 }
 
 func TestDiffBudget_LargeDocument(t *testing.T) {
-	uc := &RunDocUpdateUseCase{maxContextBytes: 500000}
+	uc := &RunDocUpdateUseCase{acpCfg: config.ACPConfig{MaxContextBytes: 500000}}
 	
 	// Document takes most of the budget: 500000 - 480000 - 2048 = 17952
 	// Since 17952 >= 2048 (overhead), we get the calculated budget
@@ -217,7 +218,7 @@ func TestDiffBudget_LargeDocument(t *testing.T) {
 }
 
 func TestDiffBudget_VeryLargeDocument(t *testing.T) {
-	uc := &RunDocUpdateUseCase{maxContextBytes: 500000}
+	uc := &RunDocUpdateUseCase{acpCfg: config.ACPConfig{MaxContextBytes: 500000}}
 	
 	// Document leaves less than overhead: 500000 - 498000 - 2048 = -48
 	// Since -48 < 2048, we get maxContextBytes/4
@@ -230,7 +231,7 @@ func TestDiffBudget_VeryLargeDocument(t *testing.T) {
 }
 
 func TestDiffBudget_EmptyDocument(t *testing.T) {
-	uc := &RunDocUpdateUseCase{maxContextBytes: 500000}
+	uc := &RunDocUpdateUseCase{acpCfg: config.ACPConfig{MaxContextBytes: 500000}}
 	
 	budget := uc.diffBudget(0)
 	expected := 500000 - 0 - 2048

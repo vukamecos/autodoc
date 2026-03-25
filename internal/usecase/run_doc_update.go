@@ -19,20 +19,20 @@ import (
 
 // RunDocUpdateUseCase orchestrates the full documentation update flow.
 type RunDocUpdateUseCase struct {
-	repo            domain.RepositoryPort
-	mrCreator       domain.MRCreatorPort
-	state           domain.StateStorePort
-	docStore        domain.DocumentStorePort
-	docWriter       domain.DocumentWriterPort
-	acp             domain.ACPClientPort
-	analyzer        domain.ChangeAnalyzerPort
-	mapper          domain.DocumentMapperPort
-	validator       domain.ValidationPort
-	gitCfg          config.GitConfig
-	maxContextBytes int
-	dryRun          bool
-	log             *slog.Logger
-	metrics         *observability.Metrics
+	repo      domain.RepositoryPort
+	mrCreator domain.MRCreatorPort
+	state     domain.StateStorePort
+	docStore  domain.DocumentStorePort
+	docWriter domain.DocumentWriterPort
+	acp       domain.ACPClientPort
+	analyzer  domain.ChangeAnalyzerPort
+	mapper    domain.DocumentMapperPort
+	validator domain.ValidationPort
+	gitCfg    config.GitConfig
+	acpCfg    config.ACPConfig
+	dryRun    bool
+	log       *slog.Logger
+	metrics   *observability.Metrics
 }
 
 // New constructs a RunDocUpdateUseCase with all required dependencies.
@@ -47,26 +47,26 @@ func New(
 	mapper domain.DocumentMapperPort,
 	validator domain.ValidationPort,
 	gitCfg config.GitConfig,
-	maxContextBytes int,
+	acpCfg config.ACPConfig,
 	dryRun bool,
 	log *slog.Logger,
 	metrics *observability.Metrics,
 ) *RunDocUpdateUseCase {
 	return &RunDocUpdateUseCase{
-		repo:            repo,
-		mrCreator:       mrCreator,
-		state:           state,
-		docStore:        docStore,
-		docWriter:       docWriter,
-		acp:             acp,
-		analyzer:        analyzer,
-		mapper:          mapper,
-		validator:       validator,
-		gitCfg:          gitCfg,
-		maxContextBytes: maxContextBytes,
-		dryRun:          dryRun,
-		log:             log,
-		metrics:         metrics,
+		repo:      repo,
+		mrCreator: mrCreator,
+		state:     state,
+		docStore:  docStore,
+		docWriter: docWriter,
+		acp:       acp,
+		analyzer:  analyzer,
+		mapper:    mapper,
+		validator: validator,
+		gitCfg:    gitCfg,
+		acpCfg:    acpCfg,
+		dryRun:    dryRun,
+		log:       log,
+		metrics:   metrics,
 	}
 }
 

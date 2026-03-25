@@ -35,9 +35,10 @@ type RepositoryConfig struct {
 }
 
 type DocumentationConfig struct {
-	AllowedPaths     []string            `yaml:"allowed_paths"`
-	PrimaryLanguage  string              `yaml:"primary_language"`
-	RequiredSections map[string][]string `yaml:"required_sections"`
+	AllowedPaths      []string            `yaml:"allowed_paths"`
+	PrimaryLanguage   string              `yaml:"primary_language"`
+	SupportedLanguages []string           `yaml:"supported_languages"` // e.g., ["en", "ru", "de"]
+	RequiredSections  map[string][]string `yaml:"required_sections"`
 }
 
 type MappingRule struct {
@@ -89,7 +90,8 @@ type ObservabilityConfig struct {
 	PprofAddr    string `yaml:"pprof_addr"` // defaults to ":6060" when pprof is enabled
 }
 
-// Load reads a YAML config file at path and applies defaults and environment overrides.
+// Load reads a YAML config file at path, applies defaults and environment overrides,
+// and validates the configuration. Returns an error if the config is invalid.
 func Load(path string) (*Config, error) {
 	cfg := &Config{}
 	applyDefaults(cfg)
@@ -111,6 +113,11 @@ func Load(path string) (*Config, error) {
 	}
 	if tok := os.Getenv("AUTODOC_ACP_TOKEN"); tok != "" {
 		cfg.ACP.Token = tok
+	}
+
+	// Validate configuration (fail fast on invalid config)
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
