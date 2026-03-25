@@ -13,14 +13,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/vukamecos/autodoc/internal/adapters/acp"
 	fsadapter "github.com/vukamecos/autodoc/internal/adapters/fs"
-	githubadapter "github.com/vukamecos/autodoc/internal/adapters/github"
-	gitlabadapter "github.com/vukamecos/autodoc/internal/adapters/gitlab"
-	ollamaadapter "github.com/vukamecos/autodoc/internal/adapters/ollama"
 	"github.com/vukamecos/autodoc/internal/adapters/storage"
 	"github.com/vukamecos/autodoc/internal/config"
-	"github.com/vukamecos/autodoc/internal/domain"
+	"github.com/vukamecos/autodoc/internal/infrastructure"
 	"github.com/vukamecos/autodoc/internal/observability"
 	"github.com/vukamecos/autodoc/internal/scheduler"
 	"github.com/vukamecos/autodoc/internal/usecase"
@@ -57,11 +53,11 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		return nil, fmt.Errorf("app: init storage: %w", err)
 	}
 
-	repoAdapter, mrAdapter, err := newProviderAdapters(cfg, log)
+	repoAdapter, mrAdapter, err := infrastructure.NewRepositoryProvider(cfg, log)
 	if err != nil {
 		return nil, err
 	}
-	acpClient, err := newACPAdapter(cfg, log, metrics)
+	acpClient, err := infrastructure.NewLLMProvider(cfg, log, metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -186,11 +182,11 @@ func NewOnce(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		return nil, fmt.Errorf("app: init storage: %w", err)
 	}
 
-	repoAdapter, mrAdapter, err := newProviderAdapters(cfg, log)
+	repoAdapter, mrAdapter, err := infrastructure.NewRepositoryProvider(cfg, log)
 	if err != nil {
 		return nil, err
 	}
-	acpClient, err := newACPAdapter(cfg, log, metrics)
+	acpClient, err := infrastructure.NewLLMProvider(cfg, log, metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -273,34 +269,6 @@ func (a *App) RunOnce(ctx context.Context) error {
 	return a.useCase.Run(ctx)
 }
 
-// newProviderAdapters constructs the RepositoryPort and MRCreatorPort for the
-// configured provider ("gitlab" or "github"). Returns an error for unknown providers.
-func newProviderAdapters(cfg *config.Config, log *slog.Logger) (domain.RepositoryPort, domain.MRCreatorPort, error) {
-	switch cfg.Repository.Provider {
-	case "gitlab", "":
-		a := gitlabadapter.New(cfg.Repository, cfg.Git, log)
-		return a, a, nil
-	case "github":
-		a := githubadapter.New(cfg.Repository, cfg.Git, log)
-		return a, a, nil
-	default:
-		return nil, nil, fmt.Errorf("app: unknown repository provider %q (supported: gitlab, github)", cfg.Repository.Provider)
-	}
-}
-
-// newACPAdapter constructs the ACPClientPort for the configured provider.
-func newACPAdapter(cfg *config.Config, log *slog.Logger, metrics *observability.Metrics) (domain.ACPClientPort, error) {
-	switch cfg.ACP.Provider {
-	case "acp", "":
-		return acp.New(cfg.ACP, log, metrics), nil
-	case "ollama":
-		// acp.model may be empty; auto-selection happens per-request in the chunker.
-		return ollamaadapter.New(cfg.ACP, log, metrics), nil
-	default:
-		return nil, fmt.Errorf("app: unknown acp provider %q (supported: acp, ollama)", cfg.ACP.Provider)
-	}
-}
-
 // Shutdown gracefully stops the scheduler and HTTP server.
 func (a *App) Shutdown(ctx context.Context) error {
 	if a.scheduler != nil {
@@ -339,24 +307,35 @@ func (a *App) Shutdown(ctx context.Context) error {
 }
 
 // checkLLMHealth performs a simple connectivity check to the LLM provider.
-// For ACP providers, it attempts a basic HTTP GET to the base URL.
 // Returns true if the provider appears reachable.
 func checkLLMHealth(cfg config.ACPConfig) bool {
 	client := &http.Client{Timeout: 5 * time.Second}
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
-		if cfg.Provider == "ollama" {
+		switch cfg.Provider {
+		case "ollama":
 			baseURL = "http://localhost:11434"
-		} else {
+		case "openai", "":
+			baseURL = "https://api.openai.com/v1"
+		case "mistral":
+			baseURL = "https://api.mistral.ai/v1"
+		case "groq":
+			baseURL = "https://api.groq.com/openai/v1"
+		case "deepseek":
+			baseURL = "https://api.deepseek.com/v1"
+		case "kimi":
+			baseURL = "https://api.moonshot.cn/v1"
+		case "anthropic":
+			baseURL = "https://api.anthropic.com"
+		default:
 			return false // No base URL configured
 		}
 	}
 
-	// For Ollama, check /api/tags endpoint
-	// For generic ACP, just check if the base URL is reachable
-	checkURL := baseURL
-	if cfg.Provider == "ollama" || strings.Contains(baseURL, "11434") {
-		checkURL = strings.TrimRight(baseURL, "/") + "/api/tags"
+	// Ollama exposes a dedicated health endpoint; for all others just ping the base URL.
+	checkURL := strings.TrimRight(baseURL, "/")
+	if cfg.Provider == "ollama" {
+		checkURL += "/api/tags"
 	}
 
 	resp, err := client.Get(checkURL)

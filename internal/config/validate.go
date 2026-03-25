@@ -22,8 +22,16 @@ func (cfg *Config) Validate() error {
 	}
 
 	// ACP validation
-	if cfg.ACP.Provider != "" && cfg.ACP.Provider != "acp" && cfg.ACP.Provider != "ollama" {
-		errors = append(errors, fmt.Sprintf("acp.provider must be 'acp' or 'ollama', got %q", cfg.ACP.Provider))
+	validProviders := map[string]bool{
+		"acp": true, "ollama": true, "kimi": true,
+		"openai": true, "mistral": true, "groq": true,
+		"deepseek": true, "anthropic": true,
+	}
+	if cfg.ACP.Provider != "" && !validProviders[cfg.ACP.Provider] {
+		errors = append(errors, fmt.Sprintf(
+			"acp.provider must be one of: acp, ollama, kimi, openai, mistral, groq, deepseek, anthropic; got %q",
+			cfg.ACP.Provider,
+		))
 	}
 	// acp.model is optional for ollama — when empty, the model is auto-selected
 	// per request based on diff size (see usecase.ModelSelector).

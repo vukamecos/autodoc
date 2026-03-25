@@ -2,6 +2,7 @@
 
 > All critical items complete. Project is production-ready.
 > Last reviewed: 2026-03-25. All previously open items from the Future Improvements section were implemented in this session.
+> 2026-03-25: Added 6 new LLM providers (openai, mistral, groq, deepseek, anthropic, generic openaicompat base), infrastructure layer, zero lint issues.
 
 ## Overview
 
@@ -17,6 +18,8 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] Go 1.26+, Clean Architecture
 - [x] GitLab & GitHub support
 - [x] ACP & Ollama LLM providers
+- [x] Kimi, OpenAI, Mistral, Groq, DeepSeek, Anthropic providers
+- [x] Infrastructure layer (`internal/infrastructure`) — `NewRepositoryProvider` / `NewLLMProvider` factories
 - [x] 6-step validation layer
 - [x] Context hash deduplication
 - [x] Chunking for large diffs
@@ -30,7 +33,10 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 | `adapters/fs` | 15 | 73.0% |
 | `adapters/github` | 16 | 89.2% |
 | `adapters/gitlab` | 24 (9 integration) | 92.2% |
+| `adapters/anthropic` | 7 | ~75% |
+| `adapters/kimi` | 8 | ~75% |
 | `adapters/ollama` | 6 | 67.7% |
+| `adapters/openaicompat` | 8 | ~75% |
 | `adapters/storage` | 6 | 73.1% |
 | `circuitbreaker` | 13 | 94.1% |
 | `markdown` | 9 | 95.8% |
@@ -85,7 +91,7 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] Automatic model selection based on diff size — selects qwen3:4b/8b/14b/32b based on diff bytes
 - [x] **Fix: model auto-selection now applied** — `ACPRequest.Model` carries the selected model; Ollama client uses it as a per-request override; `acp.model` is now optional for Ollama provider
 - [x] Admin API endpoints — `POST /admin/reset-circuit` (resets circuit breaker), `POST /admin/trigger-run` (triggers a manual run)
-- [ ] Update existing bot MR/PR instead of skipping
+- [x] Update existing bot MR/PR instead of skipping — commits docs to the existing branch, updates MR description; `UpdateMR` added to `MRCreatorPort` and implemented in both adapters
 - [ ] Retry failed ACP calls with exponential backoff (different model?)
 - [ ] Config hot-reload — watch config file and reload without restart
 

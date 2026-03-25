@@ -1,7 +1,8 @@
-// Package ollama implements domain.ACPClientPort using the Ollama local LLM API.
-// It translates ACPRequest into an Ollama /api/chat call and parses the model's
-// JSON output back into an ACPResponse.
-package ollama
+// Package openaicompat provides a generic OpenAI-compatible client that
+// implements [domain.ACPClientPort]. It is used by the openai, mistral, groq,
+// and deepseek provider adapters, which only differ by base URL, default model,
+// and authentication header values.
+package openaicompat
 
 import (
 	"context"
@@ -10,11 +11,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
-	ollamaapi "github.com/ollama/ollama/api"
+	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/vukamecos/autodoc/internal/circuitbreaker"
 	"github.com/vukamecos/autodoc/internal/config"
@@ -46,27 +46,48 @@ Rules:
 - If information is insufficient, add a TODO comment in "notes" rather than guessing.
 - Keep changes minimal and accurate.`
 
-// Client implements domain.ACPClientPort via the Ollama /api/chat endpoint.
+type retryOptions struct {
+	MaxRetries int
+	RetryDelay time.Duration
+}
+
+// Client is a generic OpenAI-compatible chat completions client.
 type Client struct {
-	ollama         *ollamaapi.Client
-	model          string
-	maxRetries     int
-	retryDelay     time.Duration
+	oai            *openai.Client
+	model          string // default; overridden per-request by ACPRequest.Model
+	component      string // e.g. "openai", "mistral" — used in log/metric labels
+	retryOpts      retryOptions
 	log            *slog.Logger
 	metrics        *observability.Metrics
 	circuitBreaker *circuitbreaker.CircuitBreaker
 }
 
-// New constructs an Ollama Client.
-func New(cfg config.ACPConfig, log *slog.Logger, metrics *observability.Metrics) *Client {
+// New constructs a Client.
+//
+//   - component    — label used in log lines and circuit-breaker metrics (e.g. "openai").
+//   - defaultBaseURL — API base URL used when cfg.BaseURL is empty.
+//   - defaultModel   — model used when neither cfg.Model nor req.Model is set.
+func New(
+	cfg config.ACPConfig,
+	component, defaultBaseURL, defaultModel string,
+	log *slog.Logger,
+	metrics *observability.Metrics,
+) *Client {
 	base := cfg.BaseURL
 	if base == "" {
-		base = "http://localhost:11434"
+		base = defaultBaseURL
+	}
+	model := cfg.Model
+	if model == "" {
+		model = defaultModel
 	}
 
-	baseURL, _ := url.Parse(strings.TrimRight(base, "/"))
-	httpClient := &http.Client{Timeout: cfg.Timeout}
-	ollamaClient := ollamaapi.NewClient(baseURL, httpClient)
+	oaiCfg := openai.DefaultConfig(cfg.Token)
+	oaiCfg.BaseURL = strings.TrimRight(base, "/")
+	if cfg.Timeout > 0 {
+		oaiCfg.HTTPClient = &http.Client{Timeout: cfg.Timeout}
+	}
+	oaiClient := openai.NewClientWithConfig(oaiCfg)
 
 	var cb *circuitbreaker.CircuitBreaker
 	if cfg.CircuitBreakerEnabled {
@@ -79,69 +100,57 @@ func New(cfg config.ACPConfig, log *slog.Logger, metrics *observability.Metrics)
 			log.Warn("circuit breaker state changed",
 				slog.String("from", from.String()),
 				slog.String("to", to.String()),
-				slog.String("component", "ollama_client"),
+				slog.String("component", component+"_client"),
 			)
 			if metrics != nil {
-				metrics.CircuitBreakerState.WithLabelValues("ollama").Set(stateToFloat(to))
+				metrics.CircuitBreakerState.WithLabelValues(component).Set(stateToFloat(to))
 			}
 		})
-		// Set initial state
 		if metrics != nil {
-			metrics.CircuitBreakerState.WithLabelValues("ollama").Set(0)
+			metrics.CircuitBreakerState.WithLabelValues(component).Set(0)
 		}
 	}
 
 	return &Client{
-		ollama:         ollamaClient,
-		model:          cfg.Model,
-		maxRetries:     cfg.MaxRetries,
-		retryDelay:     cfg.RetryDelay,
+		oai:            oaiClient,
+		model:          model,
+		component:      component,
+		retryOpts:      retryOptions{MaxRetries: cfg.MaxRetries, RetryDelay: cfg.RetryDelay},
 		log:            log,
 		metrics:        metrics,
 		circuitBreaker: cb,
 	}
 }
 
-// stateToFloat converts circuit breaker state to float for metrics (0=closed, 1=half-open, 2=open).
-func stateToFloat(s circuitbreaker.State) float64 {
-	switch s {
-	case circuitbreaker.StateClosed:
-		return 0
-	case circuitbreaker.StateHalfOpen:
-		return 1
-	case circuitbreaker.StateOpen:
-		return 2
-	default:
-		return 0
-	}
-}
-
-// Generate sends the ACPRequest to Ollama and returns the parsed ACPResponse.
+// Generate sends the ACPRequest to the provider and returns the parsed ACPResponse.
 func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.ACPResponse, error) {
-	// Circuit breaker check
+	prefix := c.component + ":"
+
+	// Circuit breaker check.
 	if c.circuitBreaker != nil {
 		state, failures, _, _ := c.circuitBreaker.Stats()
 		if state == circuitbreaker.StateOpen {
-			c.log.WarnContext(ctx, "ollama: circuit breaker is open, rejecting request",
+			c.log.WarnContext(ctx, prefix+" circuit breaker is open, rejecting request",
 				slog.String("correlation_id", req.CorrelationID),
 				slog.Uint64("consecutive_failures", uint64(failures)),
 			)
 			if c.metrics != nil {
 				c.metrics.ACPRequestsTotal.WithLabelValues("circuit_open").Inc()
 			}
-			return nil, fmt.Errorf("ollama: %w", circuitbreaker.ErrOpenCircuit)
+			return nil, fmt.Errorf("%s %w", prefix, circuitbreaker.ErrOpenCircuit)
 		}
 	}
 
 	start := time.Now()
-	userMsg := buildUserMessage(req)
 
 	model := c.model
 	if req.Model != "" {
 		model = req.Model
 	}
 
-	c.log.InfoContext(ctx, "ollama: sending request",
+	userMsg := BuildUserMessage(req)
+
+	c.log.InfoContext(ctx, prefix+" sending request",
 		slog.String("model", model),
 		slog.String("correlation_id", req.CorrelationID),
 		slog.Int("prompt_bytes", len(userMsg)),
@@ -151,40 +160,37 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 	var execErr error
 
 	executeRequest := func() error {
-		return retryCall(ctx, c.maxRetries, c.retryDelay, func() error {
-			stream := false
-			chatReq := &ollamaapi.ChatRequest{
+		return retryCall(ctx, c.retryOpts.MaxRetries, c.retryOpts.RetryDelay, func() error {
+			resp, err := c.oai.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 				Model: model,
-				Messages: []ollamaapi.Message{
-					{Role: "system", Content: systemPrompt},
-					{Role: "user", Content: userMsg},
+				Messages: []openai.ChatCompletionMessage{
+					{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
+					{Role: openai.ChatMessageRoleUser, Content: userMsg},
 				},
-				Stream: &stream,
-				Format: json.RawMessage(`"json"`),
-			}
-
-			var finalContent string
-			err := c.ollama.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
-				finalContent = resp.Message.Content
-				return nil
+				ResponseFormat: &openai.ChatCompletionResponseFormat{
+					Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+				},
 			})
 			if err != nil {
-				return fmt.Errorf("ollama: request failed: %w", err)
+				return fmt.Errorf("%s request failed: %w", prefix, err)
 			}
 
-			// Parse the model's JSON content into ACPResponse.
-			content := strings.TrimSpace(finalContent)
+			if len(resp.Choices) == 0 {
+				return fmt.Errorf("%s empty choices in response: %w", prefix, domain.ErrInvalidACPResponse)
+			}
+
+			content := strings.TrimSpace(resp.Choices[0].Message.Content)
 			var acpResp domain.ACPResponse
 			if err := json.Unmarshal([]byte(content), &acpResp); err != nil {
-				c.log.WarnContext(ctx, "ollama: model output is not valid ACPResponse JSON",
+				c.log.WarnContext(ctx, prefix+" model output is not valid ACPResponse JSON",
 					slog.String("raw_content", truncate(content, 500)),
 					slog.String("error", err.Error()),
 				)
-				return fmt.Errorf("ollama: parse model output as ACPResponse: %w", domain.ErrInvalidACPResponse)
+				return fmt.Errorf("%s parse model output as ACPResponse: %w", prefix, domain.ErrInvalidACPResponse)
 			}
 
 			if acpResp.Summary == "" && len(acpResp.Files) == 0 {
-				return fmt.Errorf("ollama: response missing required fields: %w", domain.ErrInvalidACPResponse)
+				return fmt.Errorf("%s response missing required fields: %w", prefix, domain.ErrInvalidACPResponse)
 			}
 
 			result = &acpResp
@@ -192,14 +198,12 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 		})
 	}
 
-	// Execute with circuit breaker if enabled
 	if c.circuitBreaker != nil {
 		execErr = c.circuitBreaker.Execute(ctx, executeRequest)
 	} else {
 		execErr = executeRequest()
 	}
 
-	// Record metrics and handle result
 	if execErr != nil {
 		if c.metrics != nil {
 			c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
@@ -215,7 +219,7 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 		c.metrics.ACPRequestsTotal.WithLabelValues("success").Inc()
 	}
 
-	c.log.InfoContext(ctx, "ollama: received response",
+	c.log.InfoContext(ctx, prefix+" received response",
 		slog.String("correlation_id", req.CorrelationID),
 		slog.Int("files", len(result.Files)),
 		slog.String("summary", truncate(result.Summary, 120)),
@@ -224,15 +228,15 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 }
 
 // ResetCircuit forces the circuit breaker back to closed state.
-// Used by the admin /admin/reset-circuit endpoint.
 func (c *Client) ResetCircuit() {
 	if c.circuitBreaker != nil {
 		c.circuitBreaker.Reset()
 	}
 }
 
-// buildUserMessage assembles the user prompt from the ACPRequest fields.
-func buildUserMessage(req domain.ACPRequest) string {
+// BuildUserMessage assembles the user prompt from ACPRequest fields.
+// Exported so that provider-specific wrappers and tests can use it directly.
+func BuildUserMessage(req domain.ACPRequest) string {
 	var sb strings.Builder
 
 	if req.Instructions != "" {
@@ -259,7 +263,19 @@ func buildUserMessage(req domain.ACPRequest) string {
 	return sb.String()
 }
 
-// truncate returns the first n bytes of s, appending "…" if truncated.
+func stateToFloat(s circuitbreaker.State) float64 {
+	switch s {
+	case circuitbreaker.StateClosed:
+		return 0
+	case circuitbreaker.StateHalfOpen:
+		return 1
+	case circuitbreaker.StateOpen:
+		return 2
+	default:
+		return 0
+	}
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

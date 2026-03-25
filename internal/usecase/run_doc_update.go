@@ -115,15 +115,21 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 		return nil
 	}
 
-	// 4. Check for open bot MRs.
+	// 4. Check for open bot MRs. Keep the first one so we can update it later
+	// instead of opening a duplicate. existingMR is empty when none are open.
 	log.InfoContext(ctx, "run: checking for open bot MRs")
 	openMRs, err := uc.mrCreator.OpenBotMRs(ctx)
 	if err != nil {
 		return fmt.Errorf("run: check open bot mrs: %w", err)
 	}
+	var existingMR domain.MergeRequest
 	if len(openMRs) > 0 {
-		log.WarnContext(ctx, "run: open bot MR already exists, skipping", "count", len(openMRs))
-		return domain.ErrOpenMRExists
+		existingMR = openMRs[0]
+		log.InfoContext(ctx, "run: found open bot MR, will update it instead of opening a new one",
+			"mr_id", existingMR.ID,
+			"mr_branch", existingMR.Branch,
+			"mr_url", existingMR.URL,
+		)
 	}
 
 	// 5. Diff from last processed SHA to HEAD.
@@ -239,35 +245,47 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 		}
 	}
 
-	// 11. If not dry-run: create branch, commit, create MR.
+	// 11. If not dry-run: commit docs and create or update the bot MR.
 	var mrID string
 	if !uc.dryRun {
-		branchName := fmt.Sprintf("%s%d", uc.gitCfg.BranchPrefix, time.Now().Unix())
-		log.InfoContext(ctx, "run: creating branch", "branch", branchName)
-
-		if err := uc.mrCreator.CreateBranch(ctx, branchName); err != nil {
-			return fmt.Errorf("run: create branch: %w", err)
-		}
-
 		commitMsg := uc.gitCfg.CommitMessageTemplate
-		if err := uc.mrCreator.CommitFiles(ctx, branchName, updatedDocs, commitMsg); err != nil {
-			return fmt.Errorf("run: commit files: %w", err)
-		}
+		mrTitle := "Docs: synchronize documentation with repository changes"
+		mrDesc := buildMRDescription(updatedDocs)
 
-		mr := domain.MergeRequest{
-			Title:       "Docs: synchronize documentation with repository changes",
-			Description: buildMRDescription(updatedDocs),
-			Branch:      branchName,
-		}
-		createdMR, err := uc.mrCreator.CreateMR(ctx, mr)
-		if err != nil {
-			return fmt.Errorf("run: create mr: %w", err)
-		}
-		mrID = createdMR.ID
-		log.InfoContext(ctx, "run: merge request created", "mr_id", mrID, "mr_url", createdMR.URL)
-
-		if uc.metrics != nil {
-			uc.metrics.MRCreatedTotal.Inc()
+		if existingMR.ID != "" {
+			// Re-use the existing MR's branch: commit updated docs on top of it.
+			log.InfoContext(ctx, "run: committing to existing bot MR branch", "branch", existingMR.Branch)
+			if err := uc.mrCreator.CommitFiles(ctx, existingMR.Branch, updatedDocs, commitMsg); err != nil {
+				return fmt.Errorf("run: commit files to existing branch: %w", err)
+			}
+			// Refresh the MR description to reflect the latest set of changed docs.
+			updatedMR := domain.MergeRequest{Title: mrTitle, Description: mrDesc}
+			if err := uc.mrCreator.UpdateMR(ctx, existingMR.ID, updatedMR); err != nil {
+				// Non-fatal: the commits are already pushed, so log and continue.
+				log.WarnContext(ctx, "run: failed to update MR description", "mr_id", existingMR.ID, "error", err)
+			}
+			mrID = existingMR.ID
+			log.InfoContext(ctx, "run: existing bot MR updated", "mr_id", mrID, "mr_url", existingMR.URL)
+		} else {
+			// No existing MR — create a new branch and open a fresh MR.
+			branchName := fmt.Sprintf("%s%d", uc.gitCfg.BranchPrefix, time.Now().Unix())
+			log.InfoContext(ctx, "run: creating branch", "branch", branchName)
+			if err := uc.mrCreator.CreateBranch(ctx, branchName); err != nil {
+				return fmt.Errorf("run: create branch: %w", err)
+			}
+			if err := uc.mrCreator.CommitFiles(ctx, branchName, updatedDocs, commitMsg); err != nil {
+				return fmt.Errorf("run: commit files: %w", err)
+			}
+			mr := domain.MergeRequest{Title: mrTitle, Description: mrDesc, Branch: branchName}
+			createdMR, err := uc.mrCreator.CreateMR(ctx, mr)
+			if err != nil {
+				return fmt.Errorf("run: create mr: %w", err)
+			}
+			mrID = createdMR.ID
+			log.InfoContext(ctx, "run: merge request created", "mr_id", mrID, "mr_url", createdMR.URL)
+			if uc.metrics != nil {
+				uc.metrics.MRCreatedTotal.Inc()
+			}
 		}
 	}
 

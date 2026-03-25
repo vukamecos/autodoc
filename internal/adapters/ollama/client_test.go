@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	ollamaapi "github.com/ollama/ollama/api"
+
 	"github.com/vukamecos/autodoc/internal/config"
 	"github.com/vukamecos/autodoc/internal/domain"
 )
@@ -50,19 +52,21 @@ func TestGenerate_Success(t *testing.T) {
 			return
 		}
 
-		// Verify request body structure.
-		var req chatRequest
+		// Verify request body structure using SDK types.
+		var req ollamaapi.ChatRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("failed to decode request body: %v", err)
 		}
 		if req.Model != "test-model" {
 			t.Errorf("expected model 'test-model', got %q", req.Model)
 		}
-		if req.Stream != false {
+		if req.Stream == nil || *req.Stream != false {
 			t.Error("expected stream=false")
 		}
-		if req.Format != "json" {
-			t.Errorf("expected format='json', got %q", req.Format)
+		// Format should be "json"
+		wantFormat := json.RawMessage(`"json"`)
+		if string(req.Format) != string(wantFormat) {
+			t.Errorf("expected format=%s, got %s", wantFormat, req.Format)
 		}
 		if len(req.Messages) < 2 {
 			t.Errorf("expected at least 2 messages (system+user), got %d", len(req.Messages))
@@ -72,11 +76,9 @@ func TestGenerate_Success(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(chatResponse{
-			Message: struct {
-				Content string `json:"content"`
-			}{Content: string(rawJSON)},
-			Done: true,
+		_ = json.NewEncoder(w).Encode(ollamaapi.ChatResponse{
+			Message: ollamaapi.Message{Role: "assistant", Content: string(rawJSON)},
+			Done:    true,
 		})
 	})
 
@@ -105,11 +107,9 @@ func TestGenerate_Success(t *testing.T) {
 func TestGenerate_InvalidJSON(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(chatResponse{
-			Message: struct {
-				Content string `json:"content"`
-			}{Content: "this is not json at all"},
-			Done: true,
+		_ = json.NewEncoder(w).Encode(ollamaapi.ChatResponse{
+			Message: ollamaapi.Message{Role: "assistant", Content: "this is not json at all"},
+			Done:    true,
 		})
 	})
 
@@ -123,11 +123,9 @@ func TestGenerate_InvalidJSON(t *testing.T) {
 func TestGenerate_EmptyResponse(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(chatResponse{
-			Message: struct {
-				Content string `json:"content"`
-			}{Content: `{"summary":"","files":[],"notes":[]}`},
-			Done: true,
+		_ = json.NewEncoder(w).Encode(ollamaapi.ChatResponse{
+			Message: ollamaapi.Message{Role: "assistant", Content: `{"summary":"","files":[],"notes":[]}`},
+			Done:    true,
 		})
 	})
 

@@ -460,6 +460,53 @@ func TestOpenBotMRs_EmptyList(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// UpdateMR (Pull Request)
+// ---------------------------------------------------------------------------
+
+func TestUpdateMR(t *testing.T) {
+	var capturedBody map[string]any
+	var capturedMethod string
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/"+testOwner+"/"+testRepo+"/pulls/42" {
+			capturedMethod = r.Method
+			_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+			writeJSON(w, map[string]any{"number": 42, "html_url": "https://github.com/pr/42"})
+			return
+		}
+		t.Errorf("unexpected path: %s", r.URL.Path)
+		http.NotFound(w, r)
+	})
+
+	a := newTestAdapter(t, handler)
+	err := a.UpdateMR(ctx, "42", domain.MergeRequest{
+		Title:       "Updated title",
+		Description: "Updated description",
+	})
+	if err != nil {
+		t.Fatalf("UpdateMR() error: %v", err)
+	}
+	if capturedMethod != http.MethodPatch {
+		t.Errorf("expected PATCH, got %s", capturedMethod)
+	}
+	if capturedBody["title"] != "Updated title" {
+		t.Errorf("expected title 'Updated title', got %q", capturedBody["title"])
+	}
+	if capturedBody["body"] != "Updated description" {
+		t.Errorf("expected body 'Updated description', got %q", capturedBody["body"])
+	}
+}
+
+func TestUpdateMR_ServerError(t *testing.T) {
+	a := newTestAdapter(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	if err := a.UpdateMR(ctx, "99", domain.MergeRequest{Title: "x"}); err == nil {
+		t.Fatal("expected error for 404 response")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Retry behaviour
 // ---------------------------------------------------------------------------
 

@@ -265,6 +265,24 @@ func (a *Adapter) CreateMR(ctx context.Context, mr domain.MergeRequest) (domain.
 	return created, nil
 }
 
+// UpdateMR updates the title and body of an existing pull request.
+// id is the PR number as a string.
+func (a *Adapter) UpdateMR(ctx context.Context, id string, mr domain.MergeRequest) error {
+	body := map[string]any{}
+	if mr.Title != "" {
+		body["title"] = mr.Title
+	}
+	if mr.Description != "" {
+		body["body"] = mr.Description
+	}
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%s", a.owner, a.repo, id)
+	if err := a.patch(ctx, path, body, nil); err != nil {
+		return fmt.Errorf("github update pr %s: %w", id, err)
+	}
+	a.log.InfoContext(ctx, "github: PR updated", slog.String("number", id))
+	return nil
+}
+
 // OpenBotMRs returns all open pull requests created by the bot
 // (identified by the bot branch prefix).
 func (a *Adapter) OpenBotMRs(ctx context.Context) ([]domain.MergeRequest, error) {

@@ -186,10 +186,21 @@ func TestValidate_UnknownProvider(t *testing.T) {
 
 func TestValidate_UnknownACPProvider(t *testing.T) {
 	cfg := minimalValidConfig()
-	cfg.ACP.Provider = "openai"
+	cfg.ACP.Provider = "cohere" // not a supported provider
 	err := cfg.Validate()
 	if err == nil {
 		t.Fatal("expected error for unknown acp provider")
+	}
+}
+
+func TestValidate_AllNewProviders(t *testing.T) {
+	providers := []string{"kimi", "openai", "mistral", "groq", "deepseek", "anthropic"}
+	for _, p := range providers {
+		cfg := minimalValidConfig()
+		cfg.ACP.Provider = p
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("provider %q should be valid, got error: %v", p, err)
+		}
 	}
 }
 

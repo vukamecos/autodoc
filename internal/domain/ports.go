@@ -12,6 +12,8 @@ type MRCreatorPort interface {
 	CreateBranch(ctx context.Context, name string) error
 	CommitFiles(ctx context.Context, branch string, docs []Document, message string) error
 	CreateMR(ctx context.Context, mr MergeRequest) (MergeRequest, error)
+	// UpdateMR updates the title and description of an existing MR/PR identified by id.
+	UpdateMR(ctx context.Context, id string, mr MergeRequest) error
 	OpenBotMRs(ctx context.Context) ([]MergeRequest, error)
 }
 

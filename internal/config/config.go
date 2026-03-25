@@ -159,12 +159,8 @@ func LoadFromViper() (*Config, error) {
 		cfg.ACP.Token = tok
 	}
 
-	// Apply auto-corrections and defaults where needed
-	_, corrections := cfg.ValidateAndSetDefaults()
-	if len(corrections) > 0 {
-		// Log corrections via caller if needed
-		// For now, we just apply them silently
-	}
+	// Apply auto-corrections and defaults where needed (corrections are silently applied).
+	cfg.ValidateAndSetDefaults()
 
 	// Final validation
 	if err := cfg.Validate(); err != nil {

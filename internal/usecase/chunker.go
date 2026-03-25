@@ -28,11 +28,12 @@ func (uc *RunDocUpdateUseCase) generateWithChunking(
 		totalBytes += len(c.Diff.Patch)
 	}
 
-	// Auto-select model based on diff size when using Ollama.
+	// Auto-select model based on diff size for all local/hosted LLM providers.
 	// SelectModel returns the configured model if one is set, or picks the
-	// best model from the size-based table when acp.model is empty.
+	// best model from the provider-specific size table when acp.model is empty.
+	// The remote "acp" provider manages its own model selection internally.
 	selectedModel := ""
-	if uc.acpCfg.Provider == "ollama" {
+	if uc.acpCfg.Provider != "acp" && uc.acpCfg.Provider != "" {
 		selector := NewModelSelector(uc.acpCfg)
 		rec := selector.SelectModel(totalBytes)
 		selectedModel = rec.Model

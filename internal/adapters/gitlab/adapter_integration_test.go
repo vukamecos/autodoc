@@ -341,6 +341,54 @@ func TestCreateMR(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// UpdateMR
+// ---------------------------------------------------------------------------
+
+func TestUpdateMR(t *testing.T) {
+	var capturedMethod string
+	var capturedBody map[string]any
+
+	a := newTestAdapter(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertToken(t, r)
+		expectedPath := projectPrefix + "/merge_requests/7"
+		if r.URL.Path != expectedPath {
+			t.Errorf("expected path %q, got %q", expectedPath, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		capturedMethod = r.Method
+		_ = json.NewDecoder(r.Body).Decode(&capturedBody)
+		writeJSON(w, map[string]any{"iid": 7, "web_url": "https://gitlab.example.com/mr/7"})
+	}))
+
+	err := a.UpdateMR(ctx, "7", domain.MergeRequest{
+		Title:       "Updated title",
+		Description: "Updated description",
+	})
+	if err != nil {
+		t.Fatalf("UpdateMR() error: %v", err)
+	}
+	if capturedMethod != http.MethodPut {
+		t.Errorf("expected PUT, got %s", capturedMethod)
+	}
+	if capturedBody["title"] != "Updated title" {
+		t.Errorf("expected title 'Updated title', got %q", capturedBody["title"])
+	}
+	if capturedBody["description"] != "Updated description" {
+		t.Errorf("expected description 'Updated description', got %q", capturedBody["description"])
+	}
+}
+
+func TestUpdateMR_ServerError(t *testing.T) {
+	a := newTestAdapter(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	if err := a.UpdateMR(ctx, "99", domain.MergeRequest{Title: "x"}); err == nil {
+		t.Fatal("expected error for 404 response")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // OpenBotMRs
 // ---------------------------------------------------------------------------
 

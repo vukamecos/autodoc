@@ -206,6 +206,24 @@ func (a *Adapter) CreateMR(ctx context.Context, mr domain.MergeRequest) (domain.
 	return created, nil
 }
 
+// UpdateMR updates the title and description of an existing merge request.
+// id is the MR IID (internal ID) as a string.
+func (a *Adapter) UpdateMR(ctx context.Context, id string, mr domain.MergeRequest) error {
+	body := map[string]any{}
+	if mr.Title != "" {
+		body["title"] = mr.Title
+	}
+	if mr.Description != "" {
+		body["description"] = mr.Description
+	}
+	path := fmt.Sprintf("/projects/%s/merge_requests/%s", a.projectID, id)
+	if err := a.put(ctx, path, body, nil); err != nil {
+		return fmt.Errorf("gitlab update mr %s: %w", id, err)
+	}
+	a.log.InfoContext(ctx, "gitlab: MR updated", slog.String("iid", id))
+	return nil
+}
+
 // OpenBotMRs returns all open MRs that carry the bot label.
 func (a *Adapter) OpenBotMRs(ctx context.Context) ([]domain.MergeRequest, error) {
 	var page []struct {
@@ -259,12 +277,20 @@ func (a *Adapter) get(ctx context.Context, path string, query url.Values, out an
 }
 
 func (a *Adapter) post(ctx context.Context, path string, body, out any) error {
+	return a.sendJSON(ctx, http.MethodPost, path, body, out)
+}
+
+func (a *Adapter) put(ctx context.Context, path string, body, out any) error {
+	return a.sendJSON(ctx, http.MethodPut, path, body, out)
+}
+
+func (a *Adapter) sendJSON(ctx context.Context, method, path string, body, out any) error {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
 	makeReq := func() (*http.Request, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+path, bytes.NewReader(data))
+		req, err := http.NewRequestWithContext(ctx, method, a.baseURL+path, bytes.NewReader(data))
 		if err != nil {
 			return nil, err
 		}

@@ -1,7 +1,4 @@
-// Package ollama implements domain.ACPClientPort using the Ollama local LLM API.
-// It translates ACPRequest into an Ollama /api/chat call and parses the model's
-// JSON output back into an ACPResponse.
-package ollama
+package kimi
 
 import (
 	"context"
@@ -10,16 +7,21 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
-	ollamaapi "github.com/ollama/ollama/api"
+	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/vukamecos/autodoc/internal/circuitbreaker"
 	"github.com/vukamecos/autodoc/internal/config"
 	"github.com/vukamecos/autodoc/internal/domain"
 	"github.com/vukamecos/autodoc/internal/observability"
+)
+
+const (
+	defaultBaseURL = "https://api.moonshot.cn/v1"
+	// DefaultModel is used when neither acp.model nor ACPRequest.Model is set.
+	DefaultModel = "moonshot-v1-32k"
 )
 
 const systemPrompt = `You are a documentation maintenance assistant. You receive code diffs and existing documentation, and produce updated documentation.
@@ -46,10 +48,10 @@ Rules:
 - If information is insufficient, add a TODO comment in "notes" rather than guessing.
 - Keep changes minimal and accurate.`
 
-// Client implements domain.ACPClientPort via the Ollama /api/chat endpoint.
+// Client implements domain.ACPClientPort via the Kimi (Moonshot AI) OpenAI-compatible API.
 type Client struct {
-	ollama         *ollamaapi.Client
-	model          string
+	oai            *openai.Client
+	model          string // default model; overridden per-request by ACPRequest.Model
 	maxRetries     int
 	retryDelay     time.Duration
 	log            *slog.Logger
@@ -57,16 +59,25 @@ type Client struct {
 	circuitBreaker *circuitbreaker.CircuitBreaker
 }
 
-// New constructs an Ollama Client.
+// New constructs a Kimi Client from config.
+// The token must be set via the AUTODOC_ACP_TOKEN env var or acp.token config field.
 func New(cfg config.ACPConfig, log *slog.Logger, metrics *observability.Metrics) *Client {
 	base := cfg.BaseURL
 	if base == "" {
-		base = "http://localhost:11434"
+		base = defaultBaseURL
 	}
 
-	baseURL, _ := url.Parse(strings.TrimRight(base, "/"))
-	httpClient := &http.Client{Timeout: cfg.Timeout}
-	ollamaClient := ollamaapi.NewClient(baseURL, httpClient)
+	model := cfg.Model
+	if model == "" {
+		model = DefaultModel
+	}
+
+	oaiCfg := openai.DefaultConfig(cfg.Token)
+	oaiCfg.BaseURL = strings.TrimRight(base, "/")
+	if cfg.Timeout > 0 {
+		oaiCfg.HTTPClient = &http.Client{Timeout: cfg.Timeout}
+	}
+	oaiClient := openai.NewClientWithConfig(oaiCfg)
 
 	var cb *circuitbreaker.CircuitBreaker
 	if cfg.CircuitBreakerEnabled {
@@ -79,21 +90,20 @@ func New(cfg config.ACPConfig, log *slog.Logger, metrics *observability.Metrics)
 			log.Warn("circuit breaker state changed",
 				slog.String("from", from.String()),
 				slog.String("to", to.String()),
-				slog.String("component", "ollama_client"),
+				slog.String("component", "kimi_client"),
 			)
 			if metrics != nil {
-				metrics.CircuitBreakerState.WithLabelValues("ollama").Set(stateToFloat(to))
+				metrics.CircuitBreakerState.WithLabelValues("kimi").Set(stateToFloat(to))
 			}
 		})
-		// Set initial state
 		if metrics != nil {
-			metrics.CircuitBreakerState.WithLabelValues("ollama").Set(0)
+			metrics.CircuitBreakerState.WithLabelValues("kimi").Set(0)
 		}
 	}
 
 	return &Client{
-		ollama:         ollamaClient,
-		model:          cfg.Model,
+		oai:            oaiClient,
+		model:          model,
 		maxRetries:     cfg.MaxRetries,
 		retryDelay:     cfg.RetryDelay,
 		log:            log,
@@ -116,32 +126,34 @@ func stateToFloat(s circuitbreaker.State) float64 {
 	}
 }
 
-// Generate sends the ACPRequest to Ollama and returns the parsed ACPResponse.
+// Generate sends the ACPRequest to Kimi and returns the parsed ACPResponse.
 func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.ACPResponse, error) {
-	// Circuit breaker check
+	// Circuit breaker check.
 	if c.circuitBreaker != nil {
 		state, failures, _, _ := c.circuitBreaker.Stats()
 		if state == circuitbreaker.StateOpen {
-			c.log.WarnContext(ctx, "ollama: circuit breaker is open, rejecting request",
+			c.log.WarnContext(ctx, "kimi: circuit breaker is open, rejecting request",
 				slog.String("correlation_id", req.CorrelationID),
 				slog.Uint64("consecutive_failures", uint64(failures)),
 			)
 			if c.metrics != nil {
 				c.metrics.ACPRequestsTotal.WithLabelValues("circuit_open").Inc()
 			}
-			return nil, fmt.Errorf("ollama: %w", circuitbreaker.ErrOpenCircuit)
+			return nil, fmt.Errorf("kimi: %w", circuitbreaker.ErrOpenCircuit)
 		}
 	}
 
 	start := time.Now()
-	userMsg := buildUserMessage(req)
 
+	// Per-request model override from auto-selector.
 	model := c.model
 	if req.Model != "" {
 		model = req.Model
 	}
 
-	c.log.InfoContext(ctx, "ollama: sending request",
+	userMsg := buildUserMessage(req)
+
+	c.log.InfoContext(ctx, "kimi: sending request",
 		slog.String("model", model),
 		slog.String("correlation_id", req.CorrelationID),
 		slog.Int("prompt_bytes", len(userMsg)),
@@ -152,39 +164,36 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 
 	executeRequest := func() error {
 		return retryCall(ctx, c.maxRetries, c.retryDelay, func() error {
-			stream := false
-			chatReq := &ollamaapi.ChatRequest{
+			resp, err := c.oai.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 				Model: model,
-				Messages: []ollamaapi.Message{
-					{Role: "system", Content: systemPrompt},
-					{Role: "user", Content: userMsg},
+				Messages: []openai.ChatCompletionMessage{
+					{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
+					{Role: openai.ChatMessageRoleUser, Content: userMsg},
 				},
-				Stream: &stream,
-				Format: json.RawMessage(`"json"`),
-			}
-
-			var finalContent string
-			err := c.ollama.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
-				finalContent = resp.Message.Content
-				return nil
+				ResponseFormat: &openai.ChatCompletionResponseFormat{
+					Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+				},
 			})
 			if err != nil {
-				return fmt.Errorf("ollama: request failed: %w", err)
+				return fmt.Errorf("kimi: request failed: %w", err)
 			}
 
-			// Parse the model's JSON content into ACPResponse.
-			content := strings.TrimSpace(finalContent)
+			if len(resp.Choices) == 0 {
+				return fmt.Errorf("kimi: empty choices in response: %w", domain.ErrInvalidACPResponse)
+			}
+
+			content := strings.TrimSpace(resp.Choices[0].Message.Content)
 			var acpResp domain.ACPResponse
 			if err := json.Unmarshal([]byte(content), &acpResp); err != nil {
-				c.log.WarnContext(ctx, "ollama: model output is not valid ACPResponse JSON",
+				c.log.WarnContext(ctx, "kimi: model output is not valid ACPResponse JSON",
 					slog.String("raw_content", truncate(content, 500)),
 					slog.String("error", err.Error()),
 				)
-				return fmt.Errorf("ollama: parse model output as ACPResponse: %w", domain.ErrInvalidACPResponse)
+				return fmt.Errorf("kimi: parse model output as ACPResponse: %w", domain.ErrInvalidACPResponse)
 			}
 
 			if acpResp.Summary == "" && len(acpResp.Files) == 0 {
-				return fmt.Errorf("ollama: response missing required fields: %w", domain.ErrInvalidACPResponse)
+				return fmt.Errorf("kimi: response missing required fields: %w", domain.ErrInvalidACPResponse)
 			}
 
 			result = &acpResp
@@ -192,14 +201,12 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 		})
 	}
 
-	// Execute with circuit breaker if enabled
 	if c.circuitBreaker != nil {
 		execErr = c.circuitBreaker.Execute(ctx, executeRequest)
 	} else {
 		execErr = executeRequest()
 	}
 
-	// Record metrics and handle result
 	if execErr != nil {
 		if c.metrics != nil {
 			c.metrics.ACPRequestDuration.Observe(time.Since(start).Seconds())
@@ -215,7 +222,7 @@ func (c *Client) Generate(ctx context.Context, req domain.ACPRequest) (*domain.A
 		c.metrics.ACPRequestsTotal.WithLabelValues("success").Inc()
 	}
 
-	c.log.InfoContext(ctx, "ollama: received response",
+	c.log.InfoContext(ctx, "kimi: received response",
 		slog.String("correlation_id", req.CorrelationID),
 		slog.Int("files", len(result.Files)),
 		slog.String("summary", truncate(result.Summary, 120)),
