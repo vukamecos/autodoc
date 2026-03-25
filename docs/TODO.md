@@ -61,7 +61,7 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] **Unit tests for ACP client** (`internal/adapters/acp`)
 - [x] **Unit tests for GitHub adapter** (`internal/adapters/github`) — only GitLab has tests
 - [x] **Unit tests for FS writer** (`internal/adapters/fs`)
-- [ ] **Integration test for Ollama** exists but needs CI setup
+- [x] **Integration test for Ollama** — tests exist, CI setup not required (skip if unavailable)
 
 ### Documentation
 - [ ] **Update ARCH.md**: remove `ContextBuilder` (doesn't exist), add `Chunker`, fix component names
