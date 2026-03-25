@@ -49,8 +49,7 @@ type RepositoryPort interface {
 Orchestrates business logic. Operates only through domain interfaces. Has no knowledge of GitLab, SQLite, or HTTP.
 
 Main use cases:
-- `RunDocUpdateUseCase` — primary flow: fetch → diff → analyze → map → build context → call ACP → write → validate → commit → MR
-- `CheckOpenMRsUseCase` — deduplication: check for existing bot MRs before creating a new one
+- `RunDocUpdateUseCase` — primary flow: fetch → diff → analyze → map → build context → call ACP → write → validate → commit → MR (includes deduplication check)
 
 ```go
 type RunDocUpdateUseCase struct {
@@ -194,15 +193,17 @@ domain.RepositoryPort  ←  usecase.RunDocUpdateUseCase
 adapters/gitlab.GitLabAdapter
 ```
 
-Wired in `cmd/autodoc/main.go`:
+Wired in `cmd/autodoc/run.go`:
 
 ```go
-repo := gitlab.NewAdapter(cfg.Repository)
-store := storage.NewSQLiteStore(cfg.Storage)
-acp := acp.NewClient(cfg.ACP)
+repoAdapter, mrAdapter := gitlab.NewAdapter(cfg.Repository, cfg.Git, log)
+store := storage.New(cfg.Storage, log)
+acpClient := acp.New(cfg.ACP, log, metrics)
 
-uc := usecase.NewRunDocUpdateUseCase(repo, store, acp, ...)
-scheduler.Start(uc)
+uc := usecase.New(repoAdapter, mrAdapter, store, ...)
+sched := scheduler.New(log)
+sched.Register(cfg.Scheduler.Cron, uc)
+sched.Start()
 ```
 
 ---
