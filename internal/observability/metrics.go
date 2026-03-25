@@ -4,11 +4,13 @@ import "github.com/prometheus/client_golang/prometheus"
 
 // Metrics holds all Prometheus instruments for autodoc.
 type Metrics struct {
-	RunsTotal          *prometheus.CounterVec
-	DocsUpdatedTotal   prometheus.Counter
-	MRCreatedTotal     prometheus.Counter
-	ACPRequestsTotal   *prometheus.CounterVec
-	ACPRequestDuration prometheus.Histogram
+	RunsTotal              *prometheus.CounterVec
+	DocsUpdatedTotal       prometheus.Counter
+	MRCreatedTotal         prometheus.Counter
+	ACPRequestsTotal       *prometheus.CounterVec
+	ACPRequestDuration     prometheus.Histogram
+	ValidationFailuresTotal *prometheus.CounterVec
+	ChunkedRequestsTotal   prometheus.Counter
 }
 
 // NewMetrics creates and registers all metrics with reg.
@@ -39,6 +41,16 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Help:    "Duration of ACP requests in seconds.",
 			Buckets: prometheus.DefBuckets,
 		}),
+
+		ValidationFailuresTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "autodoc_validation_failures_total",
+			Help: "Total number of validation failures, partitioned by check type.",
+		}, []string{"check"}),
+
+		ChunkedRequestsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "autodoc_chunked_requests_total",
+			Help: "Total number of requests that required chunking (diff exceeded context limit).",
+		}),
 	}
 
 	reg.MustRegister(
@@ -47,6 +59,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.MRCreatedTotal,
 		m.ACPRequestsTotal,
 		m.ACPRequestDuration,
+		m.ValidationFailuresTotal,
+		m.ChunkedRequestsTotal,
 	)
 
 	return m

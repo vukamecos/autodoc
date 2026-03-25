@@ -9,18 +9,20 @@ import (
 
 	"github.com/vukamecos/autodoc/internal/config"
 	"github.com/vukamecos/autodoc/internal/domain"
+	"github.com/vukamecos/autodoc/internal/observability"
 )
 
 // Validator implements domain.ValidationPort.
 type Validator struct {
-	cfg config.ValidationConfig
-	doc config.DocumentationConfig
-	log *slog.Logger
+	cfg     config.ValidationConfig
+	doc     config.DocumentationConfig
+	log     *slog.Logger
+	metrics *observability.Metrics
 }
 
 // New creates a new Validator.
-func New(cfg config.ValidationConfig, doc config.DocumentationConfig, log *slog.Logger) *Validator {
-	return &Validator{cfg: cfg, doc: doc, log: log}
+func New(cfg config.ValidationConfig, doc config.DocumentationConfig, log *slog.Logger, metrics *observability.Metrics) *Validator {
+	return &Validator{cfg: cfg, doc: doc, log: log, metrics: metrics}
 }
 
 // Validate runs all configured checks against an updated Document.
@@ -45,6 +47,9 @@ func (v *Validator) Validate(ctx context.Context, original, updated domain.Docum
 				slog.String("check", check.name),
 				slog.String("error", err.Error()),
 			)
+			if v.metrics != nil {
+				v.metrics.ValidationFailuresTotal.WithLabelValues(check.name).Inc()
+			}
 			return err
 		}
 	}

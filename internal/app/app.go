@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/pprof"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -57,7 +58,7 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		return nil, err
 	}
 	fsWriter := fsadapter.New(".", cfg.Documentation.AllowedPaths, log)
-	validator := validation.New(cfg.Validation, cfg.Documentation, log)
+	validator := validation.New(cfg.Validation, cfg.Documentation, log, metrics)
 	analyzer := usecase.NewChangeAnalyzer()
 	mapper := usecase.NewDocumentMapper(cfg.Mapping)
 
@@ -88,6 +89,22 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	mux.HandleFunc("/healthz/ready", func(w http.ResponseWriter, r *http.Request) {
+		// Deep health check: verify LLM provider connectivity
+		llmHealthy := checkLLMHealth(cfg.ACP)
+		status := map[string]any{
+			"status":    "ok",
+			"llm_ready": llmHealthy,
+		}
+		if !llmHealthy {
+			status["status"] = "degraded"
+			w.WriteHeader(http.StatusServiceUnavailable)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(status)
 	})
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 
@@ -209,4 +226,33 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 	a.log.Info("app: shutdown complete")
 	return nil
+}
+
+// checkLLMHealth performs a simple connectivity check to the LLM provider.
+// For ACP providers, it attempts a basic HTTP GET to the base URL.
+// Returns true if the provider appears reachable.
+func checkLLMHealth(cfg config.ACPConfig) bool {
+	client := &http.Client{Timeout: 5 * time.Second}
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		if cfg.Provider == "ollama" {
+			baseURL = "http://localhost:11434"
+		} else {
+			return false // No base URL configured
+		}
+	}
+
+	// For Ollama, check /api/tags endpoint
+	// For generic ACP, just check if the base URL is reachable
+	checkURL := baseURL
+	if cfg.Provider == "ollama" || strings.Contains(baseURL, "11434") {
+		checkURL = strings.TrimRight(baseURL, "/") + "/api/tags"
+	}
+
+	resp, err := client.Get(checkURL)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return resp.StatusCode < 500
 }

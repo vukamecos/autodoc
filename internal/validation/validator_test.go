@@ -13,7 +13,7 @@ import (
 var ctx = context.Background()
 
 func newValidator(valCfg config.ValidationConfig, docCfg config.DocumentationConfig) *Validator {
-	return New(valCfg, docCfg, slog.Default())
+	return New(valCfg, docCfg, slog.Default(), nil)
 }
 
 // ---------------------------------------------------------------------------

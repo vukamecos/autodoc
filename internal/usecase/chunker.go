@@ -42,6 +42,10 @@ func (uc *RunDocUpdateUseCase) generateWithChunking(
 		"total_bytes", totalBytes,
 	)
 
+	if uc.metrics != nil {
+		uc.metrics.ChunkedRequestsTotal.Inc()
+	}
+
 	// Accumulate the final merged response across all chunks.
 	merged := &domain.ACPResponse{}
 

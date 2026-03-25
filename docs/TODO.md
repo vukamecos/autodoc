@@ -54,9 +54,9 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [ ] End-to-end test with real GitLab/GitHub (test repo)
 
 ### Observability
-- [ ] Metric: `autodoc_validation_failures_total{check}` — count by check type
-- [ ] Metric: `autodoc_chunked_requests_total` — how often chunking triggers
-- [ ] Health check endpoint for ACP/Ollama connectivity
+- [x] Metric: `autodoc_validation_failures_total{check}` — count by check type (allowed_path, not_empty, etc.)
+- [x] Metric: `autodoc_chunked_requests_total` — how often chunking triggers
+- [x] Health check endpoint `/healthz/ready` for ACP/Ollama connectivity
 - [ ] Log MR/PR URL after creation
 
 ### Features
@@ -82,6 +82,12 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 | `autodoc_mr_created_total` | ✅ |
 | `autodoc_acp_requests_total{status}` | ✅ |
 | `autodoc_acp_request_duration_seconds` | ✅ |
+| `autodoc_validation_failures_total{check}` | ✅ |
+| `autodoc_chunked_requests_total` | ✅ |
+
+**Health Endpoints:**
+- `/healthz` — Basic liveness (always returns 200 when running)
+- `/healthz/ready` — Deep health check including LLM connectivity
 
 ---
 
