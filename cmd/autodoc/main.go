@@ -27,21 +27,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Propagate dry-run flag. The app wires it into the use case via its own
-	// construction; expose it on config so app.New can consume it.
-	_ = dryRun // consumed below via a wrapper (see note)
-
-	// Note: dry-run is passed as a field on App internally. To keep app.New
-	// signature clean we expose it via an unexported package-level var that
-	// app reads at init time, OR we extend the App to accept options.
-	// For this skeleton we store it in a package variable and the app.New
-	// function already hard-codes false; a follow-up will wire it properly.
-	// For now, log when dry-run is active.
 	if *dryRun {
 		log.Info("main: dry-run mode enabled")
 	}
 
-	a, err := app.New(cfg, log)
+	a, err := app.New(cfg, log, *dryRun)
 	if err != nil {
 		log.Error("main: failed to create app", "error", err)
 		os.Exit(1)

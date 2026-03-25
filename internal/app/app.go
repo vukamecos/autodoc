@@ -38,7 +38,8 @@ type App struct {
 }
 
 // New constructs all adapters, the use case, and registers the cron job.
-func New(cfg *config.Config, log *slog.Logger) (*App, error) {
+// If dryRun is true, the pipeline runs but no files are written and no MRs are created.
+func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 	reg := prometheus.NewRegistry()
 	metrics := observability.NewMetrics(reg)
 
@@ -72,7 +73,7 @@ func New(cfg *config.Config, log *slog.Logger) (*App, error) {
 		validator,
 		cfg.Git,
 		cfg.ACP.MaxContextBytes,
-		false,
+		dryRun,
 		log,
 		metrics,
 	)

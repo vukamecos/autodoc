@@ -54,7 +54,7 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 ## 🔧 Fixes Needed (New)
 
 ### Critical
-- [ ] **Fix dry-run mode**: flag parsed but hardcoded `false` in `app.New()`
+- [x] **Fix dry-run mode**: flag parsed but hardcoded `false` in `app.New()`
 - [ ] **Fix ACPRequestDuration metric**: defined but never measured/updated in ACP/Ollama clients
 
 ### Testing
