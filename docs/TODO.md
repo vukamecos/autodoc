@@ -58,7 +58,7 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] **Fix ACPRequestDuration metric**: now measured and updated in both ACP and Ollama clients
 
 ### Testing
-- [ ] **Unit tests for ACP client** (`internal/adapters/acp`)
+- [x] **Unit tests for ACP client** (`internal/adapters/acp`)
 - [ ] **Unit tests for GitHub adapter** (`internal/adapters/github`) — only GitLab has tests
 - [ ] **Unit tests for FS writer** (`internal/adapters/fs`)
 - [ ] **Integration test for Ollama** exists but needs CI setup
