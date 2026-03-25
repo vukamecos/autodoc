@@ -128,7 +128,7 @@ func TestGenerate_EmptyResponse(t *testing.T) {
 func TestGenerate_InvalidJSON(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{invalid json`))
+		_, _ = w.Write([]byte(`{invalid json`))
 	})
 
 	client := newTestClient(t, handler)

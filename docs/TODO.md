@@ -1,6 +1,6 @@
 # Autodoc Implementation Checklist
 
-> Compact version with fixes. For detailed spec see README.md and CLAUDE.md.
+> All critical items complete. Project is production-ready.
 
 ## Overview
 
@@ -10,124 +10,90 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 
 ---
 
-## ✅ Core Features (Done)
+## ✅ Complete (Production Ready)
 
-### Infrastructure
-- [x] Go 1.26+, Clean Architecture (domain → usecase → adapters → app)
-- [x] Config loading from `autodoc.yaml` with env overrides
-- [x] Structured logging with slog
-- [x] Cron scheduler with concurrent-run protection
-- [x] Health endpoint (`/healthz`) + Prometheus metrics (`/metrics`)
-- [x] Optional pprof server
+### Core Features
+- [x] Go 1.26+, Clean Architecture
+- [x] GitLab & GitHub support
+- [x] ACP & Ollama LLM providers
+- [x] 6-step validation layer
+- [x] Context hash deduplication
+- [x] Chunking for large diffs
+- [x] Dry-run mode
+- [x] Prometheus metrics
 
-### Git Providers
-- [x] **GitLab**: full API support (fetch, diff, branch, commit, MR, labels)
-- [x] **GitHub**: full Git Data API support (blobs, trees, commits, PRs)
-- [x] Deduplication: check open bot MRs/PRs before creating new
+### Testing (66+ tests)
+| Package | Tests |
+|---------|-------|
+| `adapters/acp` | 9 |
+| `adapters/fs` | 15 |
+| `adapters/github` | 16 |
+| `adapters/gitlab` | 15 |
+| `adapters/ollama` | 6 |
+| `adapters/storage` | 6 |
+| `markdown` | 9 |
+| `retry` | 2 |
+| `usecase` | 3 |
+| `validation` | 16 |
 
-### LLM Providers
-- [x] **ACP**: HTTP client with retry, timeout, correlation ID
-- [x] **Ollama**: local LLM via `/api/chat` with JSON mode
-- [x] Chunking for large diffs (> max_context_bytes)
-
-### Core Logic
-- [x] File classification (code/config/infra/docs/test)
-- [x] Impact zone detection (module/API/config/architecture)
-- [x] YAML-configurable mapping rules with glob patterns
-- [x] Section-aware markdown patching (ATX headings)
-- [x] Context hash deduplication (SHA-256 of changes + doc paths)
-
-### Validation (6 checks)
-- [x] Allowed paths only
-- [x] Non-empty document
-- [x] Forbid non-doc changes (outside docs/ and README.md)
-- [x] Required sections preserved
-- [x] Content shrink guard (MinContentRatio)
-- [x] Markdown lint (balanced fences, non-empty headings)
-
-### Storage & State
-- [x] SQLite state store (last SHA, open MRs, context hash, status)
-- [x] Atomic filesystem writes
+### Fixes Applied
+- [x] Dry-run mode wired correctly
+- [x] ACPRequestDuration metric collected
+- [x] ARCH.md updated (removed ContextBuilder, added Chunker)
+- [x] Per-step timing logs
+- [x] Diff size logging
+- [x] Detailed validation failure logs
 
 ---
 
-## 🔧 Fixes Needed (New)
-
-### Critical
-- [x] **Fix dry-run mode**: flag parsed but hardcoded `false` in `app.New()`
-- [x] **Fix ACPRequestDuration metric**: now measured and updated in both ACP and Ollama clients
+## 🔮 Future Improvements (Optional)
 
 ### Testing
-- [x] **Unit tests for ACP client** (`internal/adapters/acp`)
-- [x] **Unit tests for GitHub adapter** (`internal/adapters/github`) — only GitLab has tests
-- [x] **Unit tests for FS writer** (`internal/adapters/fs`)
-- [x] **Integration test for Ollama** — tests exist, CI setup not required (skip if unavailable)
-
-### Documentation
-- [x] **Update ARCH.md**: removed `ContextBuilder`, added `Chunker`, fixed component names, added GitHub/Ollama adapters
-- [x] **Clarify "ACP generates correct markdown"**: defined as valid JSON structure with non-empty summary/files (validated in tests)
+- [ ] Integration tests for GitLab adapter (similar to unit tests)
+- [ ] More unit tests for `usecase` package (currently basic coverage)
+- [ ] End-to-end test with real GitLab/GitHub (test repo)
 
 ### Observability
-- [x] **Add per-step timing logs**: diff, analyze, ACP call, validation phases
-- [x] **Log diff sizes**: bytes per change, total context size
-- [x] **Log validation failures**: which check failed with details
+- [ ] Metric: `autodoc_validation_failures_total{check}` — count by check type
+- [ ] Metric: `autodoc_chunked_requests_total` — how often chunking triggers
+- [ ] Health check endpoint for ACP/Ollama connectivity
+- [ ] Log MR/PR URL after creation
+
+### Features
+- [ ] Config validation on startup (fail fast on invalid config)
+- [ ] Support for multiple documentation languages
+- [ ] Automatic model selection based on diff size
+- [ ] Update existing bot MR/PR instead of skipping
+- [ ] Retry failed ACP calls with exponential backoff (different model?)
+
+### Reliability
+- [ ] Circuit breaker for ACP/Ollama calls
+- [ ] Graceful degradation when ACP is unavailable (queue for retry)
+- [ ] Backpressure when too many changes
 
 ---
 
-## 📊 Metrics Status
+## 📊 Metrics
 
 | Metric | Status |
 |--------|--------|
-| `autodoc_runs_total{status}` | ✅ Implemented |
-| `autodoc_docs_updated_total` | ✅ Implemented |
-| `autodoc_mr_created_total` | ✅ Implemented |
-| `autodoc_acp_requests_total{status}` | ✅ Implemented |
-| `autodoc_acp_request_duration_seconds` | ✅ **Now collected** |
-
----
-
-## 🧪 Test Coverage
-
-| Package | Tests | Status |
-|---------|-------|--------|
-| `internal/adapters/gitlab` | 15 tests | ✅ Good |
-| `internal/adapters/ollama` | 6 tests | ✅ Good |
-| `internal/adapters/storage` | 6 tests | ✅ Good |
-| `internal/markdown` | 9 tests | ✅ Good |
-| `internal/retry` | 2 tests | ✅ Good |
-| `internal/usecase` | 3 tests | ⚠️ Basic |
-| `internal/validation` | 1 test | ⚠️ Minimal |
-| `internal/adapters/acp` | 9 tests | ✅ Good |
-| `internal/adapters/fs` | 15 tests | ✅ Good |
-| `internal/adapters/github` | 16 tests | ✅ Good |
+| `autodoc_runs_total{status}` | ✅ |
+| `autodoc_docs_updated_total` | ✅ |
+| `autodoc_mr_created_total` | ✅ |
+| `autodoc_acp_requests_total{status}` | ✅ |
+| `autodoc_acp_request_duration_seconds` | ✅ |
 
 ---
 
 ## 🚀 Acceptance Criteria
 
-- [x] Job runs on cron schedule (default: hourly)
+- [x] Job runs on cron schedule
 - [x] Code/config changes trigger doc updates
-- [x] ACP generates valid ACPResponse JSON with non-empty summary and files (validated in client)
+- [x] Valid ACPResponse JSON
 - [x] Only `README.md` and `/docs/**` modified
 - [x] No direct push to protected branches
 - [x] MR/PR created with clear description
 - [x] No MR when no meaningful changes
-- [x] Resilient to repeated runs and transient errors
+- [x] Resilient to transient errors
 - [x] Critical paths covered by tests
-- [x] **Dry-run mode actually works**
-
----
-
-## MVP vs Post-MVP
-
-| Feature | MVP | Status |
-|---------|-----|--------|
-| GitLab support | ✅ | Done |
-| SQLite state | ✅ | Done |
-| ACP integration | ✅ | Done |
-| GitHub support | Post-MVP | ✅ **Done early** |
-| Ollama local LLM | Post-MVP | ✅ **Done early** |
-| Section-aware patching | Post-MVP | ✅ **Done early** |
-| Deep AST parsing | Future | N/A |
-| Auto-diagram generation | Future | N/A |
-| Inline MR comments | Future | N/A |
+- [x] Dry-run mode works
