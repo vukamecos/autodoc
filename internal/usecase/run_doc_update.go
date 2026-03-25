@@ -124,17 +124,21 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 
 	// 5. Diff from last processed SHA to HEAD.
 	uc.log.InfoContext(ctx, "run: computing diff", "from", runState.LastProcessedSHA, "to", headSHA)
+	start := time.Now()
 	diffs, err := uc.repo.Diff(ctx, runState.LastProcessedSHA, headSHA)
 	if err != nil {
 		return fmt.Errorf("run: diff: %w", err)
 	}
+	uc.log.InfoContext(ctx, "run: diff computed", "duration_ms", time.Since(start).Milliseconds(), "files", len(diffs))
 
 	// 6. Analyze changes.
 	uc.log.InfoContext(ctx, "run: analyzing changes", "diff_count", len(diffs))
+	start = time.Now()
 	changes, err := uc.analyzer.Analyze(ctx, diffs)
 	if err != nil {
 		return fmt.Errorf("run: analyze changes: %w", err)
 	}
+	uc.log.InfoContext(ctx, "run: changes analyzed", "duration_ms", time.Since(start).Milliseconds(), "changes", len(changes))
 
 	// 7. If no relevant changes, update state and return.
 	if len(changes) == 0 {
@@ -173,10 +177,12 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 		}
 
 		uc.log.InfoContext(ctx, "run: calling ACP", "doc", docPath)
+		start = time.Now()
 		acpResp, err := uc.generateWithChunking(ctx, changes, *current)
 		if err != nil {
 			return fmt.Errorf("run: acp generate for %q: %w", docPath, err)
 		}
+		uc.log.InfoContext(ctx, "run: ACP call completed", "duration_ms", time.Since(start).Milliseconds(), "files", len(acpResp.Files))
 
 		for _, acpFile := range acpResp.Files {
 			if acpFile.Path != docPath {
@@ -193,10 +199,12 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 
 			updated := domain.Document{Path: acpFile.Path, Content: content}
 
+			start = time.Now()
 			if err := uc.validator.Validate(ctx, *current, updated); err != nil {
 				uc.log.WarnContext(ctx, "run: validation failed, skipping doc", "doc", docPath, "error", err)
 				continue
 			}
+			uc.log.InfoContext(ctx, "run: validation passed", "duration_ms", time.Since(start).Milliseconds(), "doc", docPath)
 
 			if !uc.dryRun {
 				if err := uc.docWriter.WriteDocument(ctx, updated); err != nil {

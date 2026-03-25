@@ -68,7 +68,7 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] **Clarify "ACP generates correct markdown"**: defined as valid JSON structure with non-empty summary/files (validated in tests)
 
 ### Observability
-- [ ] **Add per-step timing logs**: diff, analyze, ACP call, validation phases
+- [x] **Add per-step timing logs**: diff, analyze, ACP call, validation phases
 - [ ] **Log diff sizes**: bytes per change, total context size
 - [ ] **Log validation failures**: which check failed with details
 
