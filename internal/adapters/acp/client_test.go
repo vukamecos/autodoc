@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/vukamecos/autodoc/internal/config"
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
 	"github.com/vukamecos/autodoc/internal/domain"
-	"github.com/vukamecos/autodoc/internal/observability"
+	"github.com/vukamecos/autodoc/internal/infrastructure/observability"
 )
 
 var ctx = context.Background()

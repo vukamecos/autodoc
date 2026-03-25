@@ -88,8 +88,10 @@ type StorageConfig struct {
 }
 
 type ObservabilityConfig struct {
-	PprofEnabled bool   `mapstructure:"pprof_enabled" yaml:"pprof_enabled"`
-	PprofAddr    string `mapstructure:"pprof_addr" yaml:"pprof_addr"`
+	PprofEnabled    bool   `mapstructure:"pprof_enabled" yaml:"pprof_enabled"`
+	PprofAddr       string `mapstructure:"pprof_addr" yaml:"pprof_addr"`
+	TracingEnabled  bool   `mapstructure:"tracing_enabled" yaml:"tracing_enabled"`
+	TracingEndpoint string `mapstructure:"tracing_endpoint" yaml:"tracing_endpoint"`
 }
 
 // Load reads a YAML config file at path, applies defaults and environment overrides,

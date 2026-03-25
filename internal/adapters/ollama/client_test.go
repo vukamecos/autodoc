@@ -11,7 +11,7 @@ import (
 
 	ollamaapi "github.com/ollama/ollama/api"
 
-	"github.com/vukamecos/autodoc/internal/config"
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
 	"github.com/vukamecos/autodoc/internal/domain"
 )
 

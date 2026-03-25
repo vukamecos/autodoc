@@ -1,10 +1,4 @@
-// Package infrastructure contains factory functions that construct adapter
-// implementations for the domain ports. It sits between the app layer and the
-// individual adapter packages, keeping provider-selection logic out of app.go
-// and making it easy to swap implementations.
-//
-// Layer order: domain ← usecase ← infrastructure ← app
-package infrastructure
+package app
 
 import (
 	"fmt"
@@ -17,9 +11,9 @@ import (
 	kimiadapter "github.com/vukamecos/autodoc/internal/adapters/kimi"
 	ollamaadapter "github.com/vukamecos/autodoc/internal/adapters/ollama"
 	"github.com/vukamecos/autodoc/internal/adapters/openaicompat"
-	"github.com/vukamecos/autodoc/internal/config"
 	"github.com/vukamecos/autodoc/internal/domain"
-	"github.com/vukamecos/autodoc/internal/observability"
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
+	"github.com/vukamecos/autodoc/internal/infrastructure/observability"
 )
 
 // openAICompatProviders maps provider names to (defaultBaseURL, defaultModel).

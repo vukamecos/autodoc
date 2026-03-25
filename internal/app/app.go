@@ -15,10 +15,12 @@ import (
 
 	fsadapter "github.com/vukamecos/autodoc/internal/adapters/fs"
 	"github.com/vukamecos/autodoc/internal/adapters/storage"
-	"github.com/vukamecos/autodoc/internal/config"
-	"github.com/vukamecos/autodoc/internal/infrastructure"
-	"github.com/vukamecos/autodoc/internal/observability"
-	"github.com/vukamecos/autodoc/internal/scheduler"
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
+	"github.com/vukamecos/autodoc/internal/infrastructure/observability"
+	"github.com/vukamecos/autodoc/internal/infrastructure/ratelimit"
+	"github.com/vukamecos/autodoc/internal/infrastructure/retryqueue"
+	"github.com/vukamecos/autodoc/internal/infrastructure/scheduler"
+	"github.com/vukamecos/autodoc/internal/infrastructure/tracing"
 	"github.com/vukamecos/autodoc/internal/usecase"
 	"github.com/vukamecos/autodoc/internal/validation"
 )
@@ -40,6 +42,8 @@ type App struct {
 	pprofSrv        *http.Server // nil when pprof is disabled
 	useCase         *usecase.RunDocUpdateUseCase
 	circuitResetter circuitResetter // nil when circuit breaker is disabled
+	retryQueue      *retryqueue.Queue
+	traceProvider   *tracing.Provider
 }
 
 // New constructs all adapters, the use case, and registers the cron job.
@@ -53,11 +57,11 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		return nil, fmt.Errorf("app: init storage: %w", err)
 	}
 
-	repoAdapter, mrAdapter, err := infrastructure.NewRepositoryProvider(cfg, log)
+	repoAdapter, mrAdapter, err := NewRepositoryProvider(cfg, log)
 	if err != nil {
 		return nil, err
 	}
-	acpClient, err := infrastructure.NewLLMProvider(cfg, log, metrics)
+	acpClient, err := NewLLMProvider(cfg, log, metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +69,18 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 	validator := validation.New(cfg.Validation, cfg.Documentation, log, metrics)
 	analyzer := usecase.NewChangeAnalyzer()
 	mapper := usecase.NewDocumentMapper(cfg.Mapping)
+
+	// Initialize tracing.
+	tp, err := tracing.Setup(context.Background(), tracing.Config{
+		Enabled:  cfg.Observability.TracingEnabled,
+		Endpoint: cfg.Observability.TracingEndpoint,
+	}, log)
+	if err != nil {
+		return nil, fmt.Errorf("app: init tracing: %w", err)
+	}
+
+	limiter := ratelimit.New(ratelimit.Config{})
+	limiter.Start()
 
 	uc := usecase.New(
 		repoAdapter,
@@ -81,7 +97,9 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		dryRun,
 		log,
 		metrics,
+		limiter,
 	)
+	uc.SetTracer(tp.Tracer)
 
 	sched := scheduler.New(log)
 	if err := sched.Register(cfg.Scheduler.Cron, uc); err != nil {
@@ -118,6 +136,12 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 	})
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 
+	rq := retryqueue.New(retryqueue.Config{
+		MaxSize:       100,
+		MaxRetries:    3,
+		RetryInterval: 30 * time.Second,
+	}, log)
+
 	// Admin endpoints.
 	mux.HandleFunc("/admin/reset-circuit", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -140,8 +164,9 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		}
 		go func() {
 			log.Info("app: manual run triggered via admin endpoint")
-			if err := uc.Run(context.Background()); err != nil {
-				log.Error("app: admin-triggered run failed", "error", err)
+			if runErr := uc.Run(context.Background()); runErr != nil {
+				log.Error("app: admin-triggered run failed, queueing for retry", "error", runErr)
+				rq.Enqueue("admin-trigger", uc.Run, runErr)
 			}
 		}()
 		w.Header().Set("Content-Type", "application/json")
@@ -169,6 +194,8 @@ func New(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		pprofSrv:        pprofSrv,
 		useCase:         uc,
 		circuitResetter: resetter,
+		retryQueue:      rq,
+		traceProvider:   tp,
 	}, nil
 }
 
@@ -182,11 +209,11 @@ func NewOnce(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		return nil, fmt.Errorf("app: init storage: %w", err)
 	}
 
-	repoAdapter, mrAdapter, err := infrastructure.NewRepositoryProvider(cfg, log)
+	repoAdapter, mrAdapter, err := NewRepositoryProvider(cfg, log)
 	if err != nil {
 		return nil, err
 	}
-	acpClient, err := infrastructure.NewLLMProvider(cfg, log, metrics)
+	acpClient, err := NewLLMProvider(cfg, log, metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -194,6 +221,9 @@ func NewOnce(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 	validator := validation.New(cfg.Validation, cfg.Documentation, log, metrics)
 	analyzer := usecase.NewChangeAnalyzer()
 	mapper := usecase.NewDocumentMapper(cfg.Mapping)
+
+	limiter := ratelimit.New(ratelimit.Config{})
+	limiter.Start()
 
 	uc := usecase.New(
 		repoAdapter,
@@ -210,6 +240,7 @@ func NewOnce(cfg *config.Config, log *slog.Logger, dryRun bool) (*App, error) {
 		dryRun,
 		log,
 		metrics,
+		limiter,
 	)
 
 	return &App{
@@ -239,6 +270,11 @@ func newPprofServer(addr string) *http.Server {
 
 // Run starts the scheduler and HTTP server, blocking until ctx is cancelled.
 func (a *App) Run(ctx context.Context) error {
+	if a.retryQueue != nil {
+		a.retryQueue.Start()
+		a.log.InfoContext(ctx, "app: retry queue started")
+	}
+
 	a.scheduler.Start()
 	a.log.InfoContext(ctx, "app: scheduler started")
 
@@ -293,6 +329,18 @@ func (a *App) Shutdown(ctx context.Context) error {
 		defer pprofCancel()
 		if err := a.pprofSrv.Shutdown(pprofCtx); err != nil {
 			return fmt.Errorf("app: pprof shutdown: %w", err)
+		}
+	}
+
+	if a.retryQueue != nil {
+		a.retryQueue.Stop()
+	}
+
+	if a.traceProvider != nil {
+		traceCtx, traceCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer traceCancel()
+		if err := a.traceProvider.Shutdown(traceCtx); err != nil {
+			a.log.Warn("app: trace provider shutdown error", "error", err)
 		}
 	}
 

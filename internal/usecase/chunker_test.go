@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vukamecos/autodoc/internal/config"
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
 	"github.com/vukamecos/autodoc/internal/domain"
 )
 
@@ -405,6 +405,63 @@ func TestMergeResponse_MultipleMerges(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Integration-style tests for the chunker flow
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// FallbackModel tests
+// ---------------------------------------------------------------------------
+
+func TestFallbackModel_ReturnsNextInChain(t *testing.T) {
+	ms := NewModelSelector(config.ACPConfig{Provider: "anthropic"})
+
+	fb := ms.FallbackModel("claude-3-5-haiku-latest")
+	if fb != "claude-sonnet-4-6" {
+		t.Errorf("expected claude-sonnet-4-6, got %q", fb)
+	}
+
+	fb = ms.FallbackModel("claude-sonnet-4-6")
+	if fb != "claude-opus-4-6" {
+		t.Errorf("expected claude-opus-4-6, got %q", fb)
+	}
+}
+
+func TestFallbackModel_LastInChain(t *testing.T) {
+	ms := NewModelSelector(config.ACPConfig{Provider: "anthropic"})
+	fb := ms.FallbackModel("claude-opus-4-6")
+	if fb != "" {
+		t.Errorf("expected empty fallback for last model, got %q", fb)
+	}
+}
+
+func TestFallbackModel_UnknownModel(t *testing.T) {
+	ms := NewModelSelector(config.ACPConfig{Provider: "openai"})
+	fb := ms.FallbackModel("unknown-model")
+	if fb != "" {
+		t.Errorf("expected empty fallback for unknown model, got %q", fb)
+	}
+}
+
+func TestFallbackModel_UnknownProvider(t *testing.T) {
+	ms := NewModelSelector(config.ACPConfig{Provider: "custom"})
+	fb := ms.FallbackModel("any-model")
+	if fb != "" {
+		t.Errorf("expected empty fallback for unknown provider, got %q", fb)
+	}
+}
+
+func TestFallbackModel_AllProviders(t *testing.T) {
+	providers := []string{"ollama", "kimi", "openai", "mistral", "groq", "deepseek", "anthropic"}
+	for _, p := range providers {
+		ms := NewModelSelector(config.ACPConfig{Provider: p})
+		chain := fallbackChains[p]
+		if len(chain) < 2 {
+			continue
+		}
+		fb := ms.FallbackModel(chain[0])
+		if fb != chain[1] {
+			t.Errorf("provider %s: expected fallback %q from %q, got %q", p, chain[1], chain[0], fb)
+		}
+	}
+}
 
 func TestChunkChanges_VariousSizes(t *testing.T) {
 	tests := []struct {

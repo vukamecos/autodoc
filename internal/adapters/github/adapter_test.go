@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vukamecos/autodoc/internal/config"
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
 	"github.com/vukamecos/autodoc/internal/domain"
 )
 

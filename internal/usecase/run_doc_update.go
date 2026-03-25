@@ -10,10 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vukamecos/autodoc/internal/config"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
 	"github.com/vukamecos/autodoc/internal/domain"
-	"github.com/vukamecos/autodoc/internal/markdown"
-	"github.com/vukamecos/autodoc/internal/observability"
+	"github.com/vukamecos/autodoc/internal/infrastructure/markdown"
+	"github.com/vukamecos/autodoc/internal/infrastructure/observability"
+	"github.com/vukamecos/autodoc/internal/infrastructure/ratelimit"
 )
 
 // RunDocUpdateUseCase orchestrates the full documentation update flow.
@@ -32,6 +37,8 @@ type RunDocUpdateUseCase struct {
 	dryRun    bool
 	log       *slog.Logger
 	metrics   *observability.Metrics
+	limiter   *ratelimit.Limiter
+	tracer    trace.Tracer
 }
 
 // New constructs a RunDocUpdateUseCase with all required dependencies.
@@ -50,6 +57,7 @@ func New(
 	dryRun bool,
 	log *slog.Logger,
 	metrics *observability.Metrics,
+	limiter *ratelimit.Limiter,
 ) *RunDocUpdateUseCase {
 	return &RunDocUpdateUseCase{
 		repo:      repo,
@@ -66,15 +74,30 @@ func New(
 		dryRun:    dryRun,
 		log:       log,
 		metrics:   metrics,
+		limiter:   limiter,
+		tracer:    otelNoopTracer(),
 	}
+}
+
+func otelNoopTracer() trace.Tracer {
+	return noop.NewTracerProvider().Tracer("autodoc")
+}
+
+// SetTracer configures a real OTel tracer for the use case.
+func (uc *RunDocUpdateUseCase) SetTracer(t trace.Tracer) {
+	uc.tracer = t
 }
 
 // Run executes the full documentation update pipeline.
 func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
+	ctx, span := uc.tracer.Start(ctx, "RunDocUpdate")
+	defer span.End()
+
 	// Attach a unique run ID to every log line emitted during this execution
 	// so all pipeline steps can be correlated in structured log queries.
 	runID := fmt.Sprintf("%d", time.Now().UnixNano())
 	log := uc.log.With(slog.String("run_id", runID))
+	span.SetAttributes(attribute.String("run_id", runID))
 
 	// 1. Load state; if not found, initialize with current HEAD and return.
 	runState, err := uc.state.LoadState(ctx)
@@ -100,10 +123,13 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	}
 
 	// 2. Fetch repo.
+	fetchCtx, fetchSpan := uc.tracer.Start(ctx, "FetchRepo")
 	log.InfoContext(ctx, "run: fetching repository")
-	if err := uc.repo.Fetch(ctx); err != nil {
+	if err := uc.repo.Fetch(fetchCtx); err != nil {
+		fetchSpan.End()
 		return fmt.Errorf("run: fetch repo: %w", err)
 	}
+	fetchSpan.End()
 
 	// 3. Get HEAD SHA; skip if nothing new.
 	headSHA, err := uc.repo.HeadSHA(ctx)
@@ -133,12 +159,15 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	}
 
 	// 5. Diff from last processed SHA to HEAD.
+	diffCtx, diffSpan := uc.tracer.Start(ctx, "ComputeDiff")
 	log.InfoContext(ctx, "run: computing diff", "from", runState.LastProcessedSHA, "to", headSHA)
 	start := time.Now()
-	diffs, err := uc.repo.Diff(ctx, runState.LastProcessedSHA, headSHA)
+	diffs, err := uc.repo.Diff(diffCtx, runState.LastProcessedSHA, headSHA)
 	if err != nil {
+		diffSpan.End()
 		return fmt.Errorf("run: diff: %w", err)
 	}
+	diffSpan.End()
 	totalDiffBytes := 0
 	for _, d := range diffs {
 		totalDiffBytes += len(d.Patch)
@@ -146,12 +175,16 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	log.InfoContext(ctx, "run: diff computed", "duration_ms", time.Since(start).Milliseconds(), "files", len(diffs), "total_bytes", totalDiffBytes)
 
 	// 6. Analyze changes.
+	analyzeCtx, analyzeSpan := uc.tracer.Start(ctx, "AnalyzeChanges")
 	log.InfoContext(ctx, "run: analyzing changes", "diff_count", len(diffs))
 	start = time.Now()
-	changes, err := uc.analyzer.Analyze(ctx, diffs)
+	changes, err := uc.analyzer.Analyze(analyzeCtx, diffs)
 	if err != nil {
+		analyzeSpan.End()
 		return fmt.Errorf("run: analyze changes: %w", err)
 	}
+	analyzeSpan.SetAttributes(attribute.Int("change_count", len(changes)))
+	analyzeSpan.End()
 	log.InfoContext(ctx, "run: changes analyzed", "duration_ms", time.Since(start).Milliseconds(), "changes", len(changes))
 
 	// 7. If no relevant changes, update state and return.
@@ -190,12 +223,17 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 			return fmt.Errorf("run: read document %q: %w", docPath, err)
 		}
 
+		acpCtx, acpSpan := uc.tracer.Start(ctx, "ACPGenerate",
+			trace.WithAttributes(attribute.String("doc_path", docPath)))
 		log.InfoContext(ctx, "run: calling ACP", "doc", docPath)
 		start = time.Now()
-		acpResp, err := uc.generateWithChunking(ctx, changes, *current)
+		acpResp, err := uc.generateWithChunking(acpCtx, changes, *current)
 		if err != nil {
+			acpSpan.End()
 			return fmt.Errorf("run: acp generate for %q: %w", docPath, err)
 		}
+		acpSpan.SetAttributes(attribute.Int("response_files", len(acpResp.Files)))
+		acpSpan.End()
 		log.InfoContext(ctx, "run: ACP call completed", "duration_ms", time.Since(start).Milliseconds(), "files", len(acpResp.Files))
 
 		for _, acpFile := range acpResp.Files {
@@ -246,6 +284,7 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	}
 
 	// 11. If not dry-run: commit docs and create or update the bot MR.
+	_, mrSpan := uc.tracer.Start(ctx, "CommitAndMR")
 	var mrID string
 	if !uc.dryRun {
 		commitMsg := uc.gitCfg.CommitMessageTemplate
@@ -288,6 +327,8 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 			}
 		}
 	}
+
+	mrSpan.End()
 
 	// 12. Update state.
 	runState.LastProcessedSHA = headSHA

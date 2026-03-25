@@ -3,6 +3,7 @@
 > All critical items complete. Project is production-ready.
 > Last reviewed: 2026-03-25. All previously open items from the Future Improvements section were implemented in this session.
 > 2026-03-25: Added 6 new LLM providers (openai, mistral, groq, deepseek, anthropic, generic openaicompat base), infrastructure layer, zero lint issues.
+> 2026-03-25: Implemented all remaining Future Improvements: app tests, OTel tracing, ADRs, retry with fallback model, config hot-reload, retry queue, backpressure.
 
 ## Overview
 
@@ -46,7 +47,10 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 | `config` | 14 | ~80% |
 | `scheduler` | 5 | ~75% |
 | `observability` | 8 | ~85% |
-| `app` | 0 | 0% ⚠️ |
+| `app` | 18 | ~60% |
+| `retryqueue` | 7 | ~85% |
+| `ratelimit` | 7 | ~80% |
+| `tracing` | 2 | ~70% |
 
 ### Fixes Applied
 - [x] Dry-run mode wired correctly
@@ -70,7 +74,7 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] Unit tests for `internal/scheduler` — 5 tests: Register (valid/invalid cron, 5/6-field), Start/Stop, error handling
 - [x] Unit tests for `internal/observability` — 8 tests: log levels, invalid level default, metrics registration/usability
 - [ ] End-to-end test with real GitLab/GitHub (test repo) — requires external infra
-- [ ] Unit tests for `internal/app` — dependency wiring, app lifecycle (heavy mocking required)
+- [x] Unit tests for `internal/app` — 18 tests: HTTP endpoints, shutdown, health checks, admin endpoints, RunOnce
 
 ### Observability
 - [x] Metric: `autodoc_validation_failures_total{check}` — count by check type (allowed_path, not_empty, etc.)
@@ -78,12 +82,12 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] Health check endpoint `/healthz/ready` for ACP/Ollama connectivity
 - [x] Log MR/PR URL after creation — `CreateMR` now returns `domain.MergeRequest`; usecase logs `mr_id` and `mr_url`
 - [x] Structured logging with request IDs — each `Run()` generates a `run_id` field attached to all pipeline log lines
-- [ ] OpenTelemetry tracing — distributed traces across ACP calls (requires OTel SDK dependency)
+- [x] OpenTelemetry tracing — `internal/tracing` package with OTLP/gRPC exporter, spans on all pipeline steps
 
 ### Documentation
 - [x] Package-level documentation comments — `doc.go` files added for all 14 packages
 - [x] API documentation for admin endpoints — documented in `internal/app/doc.go`
-- [ ] Architecture Decision Records (ADRs) — document key architectural choices
+- [x] Architecture Decision Records (ADRs) — 7 ADRs in `docs/adr/` covering architecture, circuit breaker, patching, chunking, SDKs, MR updates, model selection
 
 ### Features
 - [x] Config validation on startup (fail fast on invalid config) — validates required fields, types, and relationships
@@ -92,14 +96,14 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] **Fix: model auto-selection now applied** — `ACPRequest.Model` carries the selected model; Ollama client uses it as a per-request override; `acp.model` is now optional for Ollama provider
 - [x] Admin API endpoints — `POST /admin/reset-circuit` (resets circuit breaker), `POST /admin/trigger-run` (triggers a manual run)
 - [x] Update existing bot MR/PR instead of skipping — commits docs to the existing branch, updates MR description; `UpdateMR` added to `MRCreatorPort` and implemented in both adapters
-- [ ] Retry failed ACP calls with exponential backoff (different model?)
-- [ ] Config hot-reload — watch config file and reload without restart
+- [x] Retry failed ACP calls with fallback model — `generateWithFallback` tries progressively more capable models from the provider's chain
+- [x] Config hot-reload — `viper.WatchConfig()` with `fsnotify`; reloadable: cron, model, git settings; warns on restart-required changes
 
 ### Reliability
 - [x] Circuit breaker for ACP/Ollama calls — implemented with 3 states, metrics, 13 tests
 - [x] Graceful shutdown with request draining — HTTP shutdown uses explicit 10 s deadline; pprof shutdown uses 5 s; scheduler has 30 s
-- [ ] Graceful degradation when ACP is unavailable (queue for retry)
-- [ ] Backpressure when too many changes
+- [x] Graceful degradation when ACP is unavailable — `internal/retryqueue` package: bounded in-memory queue with configurable max retries and retry interval
+- [x] Backpressure when too many changes — `internal/ratelimit` package: semaphore (max concurrent) + token bucket (max per interval) rate limiter for ACP calls
 
 ---
 

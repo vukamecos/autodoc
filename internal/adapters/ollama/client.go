@@ -16,10 +16,10 @@ import (
 
 	ollamaapi "github.com/ollama/ollama/api"
 
-	"github.com/vukamecos/autodoc/internal/circuitbreaker"
-	"github.com/vukamecos/autodoc/internal/config"
+	"github.com/vukamecos/autodoc/internal/infrastructure/circuitbreaker"
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
 	"github.com/vukamecos/autodoc/internal/domain"
-	"github.com/vukamecos/autodoc/internal/observability"
+	"github.com/vukamecos/autodoc/internal/infrastructure/observability"
 )
 
 const systemPrompt = `You are a documentation maintenance assistant. You receive code diffs and existing documentation, and produce updated documentation.

@@ -48,7 +48,7 @@ func (uc *RunDocUpdateUseCase) generateWithChunking(
 		uc.log.InfoContext(ctx, "chunker: single chunk", "doc", current.Path, "budget", budget, "changes", totalChanges, "bytes", totalBytes)
 		req := buildACPRequest(chunks[0], current)
 		req.Model = selectedModel
-		return uc.acp.Generate(ctx, req)
+		return uc.generateWithFallback(ctx, req)
 	}
 
 	uc.log.InfoContext(ctx, "chunker: diff exceeds context limit, splitting",
@@ -82,7 +82,7 @@ func (uc *RunDocUpdateUseCase) generateWithChunking(
 		}
 		uc.log.InfoContext(ctx, "chunker: processing chunk", "chunk", i+1, "total_chunks", len(chunks), "changes", len(chunk), "bytes", chunkBytes)
 
-		resp, err := uc.acp.Generate(ctx, req)
+		resp, err := uc.generateWithFallback(ctx, req)
 		if err != nil {
 			return nil, fmt.Errorf("chunker: chunk %d/%d: %w", i+1, len(chunks), err)
 		}
@@ -165,6 +165,54 @@ func mergeResponse(dst, src *domain.ACPResponse) {
 		} else {
 			index[f.Path] = len(dst.Files)
 			dst.Files = append(dst.Files, f)
+		}
+	}
+}
+
+// generateWithFallback calls acp.Generate and, on failure, retries with
+// progressively more capable models from the provider's fallback chain.
+// It also applies backpressure via the rate limiter when one is configured.
+func (uc *RunDocUpdateUseCase) generateWithFallback(
+	ctx context.Context,
+	req domain.ACPRequest,
+) (*domain.ACPResponse, error) {
+	// Apply backpressure: wait for a rate-limit slot before calling the LLM.
+	if uc.limiter != nil {
+		if err := uc.limiter.Acquire(ctx); err != nil {
+			return nil, fmt.Errorf("rate limit: %w", err)
+		}
+		defer uc.limiter.Release()
+	}
+
+	resp, err := uc.acp.Generate(ctx, req)
+	if err == nil {
+		return resp, nil
+	}
+
+	// Only attempt fallback for non-ACP providers that support model selection.
+	if uc.acpCfg.Provider == "acp" || uc.acpCfg.Provider == "" {
+		return nil, err
+	}
+
+	selector := NewModelSelector(uc.acpCfg)
+	currentModel := req.Model
+	for {
+		fallback := selector.FallbackModel(currentModel)
+		if fallback == "" {
+			return nil, err // exhausted all fallbacks
+		}
+
+		uc.log.WarnContext(ctx, "chunker: primary model failed, trying fallback",
+			"failed_model", currentModel,
+			"fallback_model", fallback,
+			"error", err.Error(),
+		)
+
+		req.Model = fallback
+		currentModel = fallback
+		resp, err = uc.acp.Generate(ctx, req)
+		if err == nil {
+			return resp, nil
 		}
 	}
 }

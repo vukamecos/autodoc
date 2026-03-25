@@ -1,7 +1,7 @@
 package usecase
 
 import (
-	"github.com/vukamecos/autodoc/internal/config"
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
 )
 
 // ModelSelector provides logic for automatically selecting the best model
@@ -397,4 +397,32 @@ func IsModelSuitable(model string, requiredContext int) bool {
 		return true // Unknown model, assume it works
 	}
 	return info.ContextSize >= requiredContext
+}
+
+// fallbackChains maps provider names to ordered lists of fallback models.
+// When the primary model fails, the next model in the chain is tried.
+var fallbackChains = map[string][]string{
+	"ollama":    {"qwen3:4b", "qwen3:8b", "qwen3:14b", "qwen3:32b"},
+	"kimi":      {"moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"},
+	"openai":    {"gpt-4o-mini", "gpt-4o", "gpt-4.1"},
+	"mistral":   {"mistral-small-latest", "mistral-medium-latest", "mistral-large-latest"},
+	"groq":      {"llama-3.1-8b-instant", "llama-3.3-70b-versatile"},
+	"deepseek":  {"deepseek-chat", "deepseek-reasoner"},
+	"anthropic": {"claude-3-5-haiku-latest", "claude-sonnet-4-6", "claude-opus-4-6"},
+}
+
+// FallbackModel returns a fallback model to try when the given model fails.
+// It returns the next more-capable model in the provider's chain, or "" if
+// no fallback is available.
+func (ms *ModelSelector) FallbackModel(currentModel string) string {
+	chain, ok := fallbackChains[ms.cfg.Provider]
+	if !ok {
+		return ""
+	}
+	for i, m := range chain {
+		if m == currentModel && i+1 < len(chain) {
+			return chain[i+1]
+		}
+	}
+	return ""
 }

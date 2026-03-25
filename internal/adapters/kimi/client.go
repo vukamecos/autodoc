@@ -12,10 +12,10 @@ import (
 
 	openai "github.com/sashabaranov/go-openai"
 
-	"github.com/vukamecos/autodoc/internal/circuitbreaker"
-	"github.com/vukamecos/autodoc/internal/config"
+	"github.com/vukamecos/autodoc/internal/infrastructure/circuitbreaker"
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
 	"github.com/vukamecos/autodoc/internal/domain"
-	"github.com/vukamecos/autodoc/internal/observability"
+	"github.com/vukamecos/autodoc/internal/infrastructure/observability"
 )
 
 const (

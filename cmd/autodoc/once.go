@@ -8,8 +8,8 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/vukamecos/autodoc/internal/app"
-	"github.com/vukamecos/autodoc/internal/config"
-	"github.com/vukamecos/autodoc/internal/observability"
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
+	"github.com/vukamecos/autodoc/internal/infrastructure/observability"
 )
 
 var onceCmd = &cobra.Command{

@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/vukamecos/autodoc/internal/app"
-	"github.com/vukamecos/autodoc/internal/config"
-	"github.com/vukamecos/autodoc/internal/observability"
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
+	"github.com/vukamecos/autodoc/internal/infrastructure/observability"
 )
 
 var runCmd = &cobra.Command{
@@ -53,6 +53,12 @@ func run(cmd *cobra.Command, args []string) error {
 		log.Info("run: starting autodoc", "config", cfgFile)
 	} else {
 		log.Info("run: starting autodoc", "config", "from environment")
+	}
+
+	// Enable config hot-reload when a config file is in use.
+	if viper.ConfigFileUsed() != "" {
+		reloader := a.EnableConfigReload()
+		defer reloader.Stop()
 	}
 
 	if err := a.Run(ctx); err != nil {

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vukamecos/autodoc/internal/config"
+	"github.com/vukamecos/autodoc/internal/infrastructure/config"
 	"github.com/vukamecos/autodoc/internal/domain"
-	"github.com/vukamecos/autodoc/internal/retry"
+	"github.com/vukamecos/autodoc/internal/infrastructure/retry"
 )
 
 const (
