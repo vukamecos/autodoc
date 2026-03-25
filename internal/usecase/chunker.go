@@ -20,9 +20,16 @@ func (uc *RunDocUpdateUseCase) generateWithChunking(
 	changes []domain.AnalyzedChange,
 	current domain.Document,
 ) (*domain.ACPResponse, error) {
-	chunks := chunkChanges(changes, uc.diffBudget(len(current.Content)))
+	budget := uc.diffBudget(len(current.Content))
+	chunks := chunkChanges(changes, budget)
+	totalChanges := len(changes)
+	totalBytes := 0
+	for _, c := range changes {
+		totalBytes += len(c.Diff.Patch)
+	}
 
 	if len(chunks) == 1 {
+		uc.log.InfoContext(ctx, "chunker: single chunk", "doc", current.Path, "budget", budget, "changes", totalChanges, "bytes", totalBytes)
 		req := buildACPRequest(chunks[0], current)
 		return uc.acp.Generate(ctx, req)
 	}
@@ -30,6 +37,9 @@ func (uc *RunDocUpdateUseCase) generateWithChunking(
 	uc.log.InfoContext(ctx, "chunker: diff exceeds context limit, splitting",
 		"chunks", len(chunks),
 		"doc", current.Path,
+		"budget", budget,
+		"total_changes", totalChanges,
+		"total_bytes", totalBytes,
 	)
 
 	// Accumulate the final merged response across all chunks.
@@ -43,6 +53,12 @@ func (uc *RunDocUpdateUseCase) generateWithChunking(
 			i+1, len(chunks),
 		)
 		req.CorrelationID = fmt.Sprintf("autodoc-%d-chunk%d", time.Now().UnixNano(), i+1)
+
+		chunkBytes := 0
+		for _, c := range chunk {
+			chunkBytes += len(c.Diff.Patch)
+		}
+		uc.log.InfoContext(ctx, "chunker: processing chunk", "chunk", i+1, "total_chunks", len(chunks), "changes", len(chunk), "bytes", chunkBytes)
 
 		resp, err := uc.acp.Generate(ctx, req)
 		if err != nil {

@@ -129,7 +129,11 @@ func (uc *RunDocUpdateUseCase) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("run: diff: %w", err)
 	}
-	uc.log.InfoContext(ctx, "run: diff computed", "duration_ms", time.Since(start).Milliseconds(), "files", len(diffs))
+	totalDiffBytes := 0
+	for _, d := range diffs {
+		totalDiffBytes += len(d.Patch)
+	}
+	uc.log.InfoContext(ctx, "run: diff computed", "duration_ms", time.Since(start).Milliseconds(), "files", len(diffs), "total_bytes", totalDiffBytes)
 
 	// 6. Analyze changes.
 	uc.log.InfoContext(ctx, "run: analyzing changes", "diff_count", len(diffs))

@@ -69,7 +69,7 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 
 ### Observability
 - [x] **Add per-step timing logs**: diff, analyze, ACP call, validation phases
-- [ ] **Log diff sizes**: bytes per change, total context size
+- [x] **Log diff sizes**: bytes per change, total context size
 - [ ] **Log validation failures**: which check failed with details
 
 ---
