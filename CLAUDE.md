@@ -38,7 +38,8 @@ Clean Architecture in four layers: `domain` → `usecase` → `adapters` → `ap
 - **`internal/usecase`** — `RunDocUpdateUseCase` (12-step pipeline), `ChangeAnalyzer`, `DocumentMapper`, chunker for large diffs.
 - **`internal/adapters`** — implementations of the domain ports:
   - `gitlab/` and `github/` — REST API adapters (no local clone; all operations through the API)
-  - `acp/` — HTTP client for the ACP agent
+  - `acp/` — HTTP client for the remote ACP agent
+  - `ollama/` — direct Ollama `/api/chat` adapter for local LLMs (system prompt instructs JSON output matching `ACPResponse`)
   - `storage/` — SQLite state store (single-row `run_state` table)
   - `fs/` — atomic filesystem writer + document reader
 - **`internal/retry`** — shared exponential-backoff retry used by all three HTTP adapters
@@ -51,8 +52,10 @@ Key flow: scheduler → `RunDocUpdateUseCase.Run()` → diff → analyze → map
 
 ## Conventions
 
-- All HTTP adapters use `retry.Do` with a `makeReq func() (*http.Request, error)` factory so the body reader is fresh on each attempt.
+- All HTTP adapters (GitLab, GitHub, ACP, Ollama) use `retry.Do` with a `makeReq func() (*http.Request, error)` factory so the body reader is fresh on each attempt.
 - `errcheck` is enforced — always assign or discard error returns, including `resp.Body.Close()` and `fmt.Fprintf` to hash writers.
 - `go 1.26` — `for i := range n` integer range syntax is available and used.
 - GitLab uses `PRIVATE-TOKEN` header; GitHub uses `Authorization: Bearer` + `X-GitHub-Api-Version`.
 - Tokens must never appear in config files — use `AUTODOC_GITLAB_TOKEN`, `AUTODOC_GITHUB_TOKEN`, or `AUTODOC_ACP_TOKEN` env vars.
+- ACP provider is configurable: `acp` (remote agent, default) or `ollama` (local LLM). Ollama requires `acp.model` to be set.
+- Ollama integration tests require a running Ollama instance; they auto-skip via `skipIfOllamaUnavailable`. Override model with `OLLAMA_TEST_MODEL` env var.

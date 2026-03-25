@@ -21,7 +21,7 @@ Runs are deduplicated by a SHA-256 hash of the input context, so repeated runs w
 ### Prerequisites
 
 - Go 1.26+
-- An ACP-compatible agent endpoint
+- An ACP-compatible agent endpoint **or** a local [Ollama](https://ollama.com) instance
 - A GitLab or GitHub token with API access to the target repository
 
 ### Build and run
@@ -43,6 +43,7 @@ make run
 |---|---|---|
 | `-config` | `autodoc.yaml` | Path to the YAML configuration file |
 | `-dry-run` | `false` | Analyse and generate updates but skip writing files and creating MR/PR |
+| `-log-level` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
 ### Dry-run mode
 
@@ -249,7 +250,7 @@ export AUTODOC_GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
 ./bin/autodoc -config autodoc.yaml
 ```
 
-Recommended models: `llama3.1`, `llama3.1:70b`, `codellama`, `mistral`, `qwen2.5-coder`. Larger models produce better documentation but require more RAM and time.
+Recommended models: `qwen3:8b`, `qwen3:14b`, `llama3.1`, `llama3.1:70b`, `codestral`, `mistral`, `qwen2.5-coder`. Larger models produce better documentation but require more RAM and time.
 
 ## HTTP endpoints
 
@@ -278,7 +279,7 @@ Enable the pprof server by setting `observability.pprof_enabled: true` in the co
 ```bash
 make build   # compile to ./bin/autodoc
 make test    # go test -race -v -count=1 ./...
-make lint    # go vet + golangci-lint
+make lint    # go vet + golangci-lint v2
 make clean   # remove ./bin
 ```
 
@@ -286,4 +287,16 @@ Run a single test:
 
 ```bash
 go test -run TestPatchDocument ./internal/markdown/...
+```
+
+### Ollama integration tests
+
+The Ollama adapter has integration tests that send real requests to a local Ollama instance. They auto-skip when Ollama is not running.
+
+```bash
+# Run with the default model (qwen3:8b)
+go test -run TestIntegration ./internal/adapters/ollama/...
+
+# Override the model
+OLLAMA_TEST_MODEL=codestral:22b go test -run TestIntegration ./internal/adapters/ollama/...
 ```
