@@ -60,7 +60,7 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 ### Testing
 - [x] **Unit tests for ACP client** (`internal/adapters/acp`)
 - [x] **Unit tests for GitHub adapter** (`internal/adapters/github`) — only GitLab has tests
-- [ ] **Unit tests for FS writer** (`internal/adapters/fs`)
+- [x] **Unit tests for FS writer** (`internal/adapters/fs`)
 - [ ] **Integration test for Ollama** exists but needs CI setup
 
 ### Documentation
