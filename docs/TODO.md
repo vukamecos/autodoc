@@ -64,8 +64,8 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 - [x] **Integration test for Ollama** — tests exist, CI setup not required (skip if unavailable)
 
 ### Documentation
-- [ ] **Update ARCH.md**: remove `ContextBuilder` (doesn't exist), add `Chunker`, fix component names
-- [ ] **Clarify "ACP generates correct markdown"**: acceptance criteria unclear — define "correct"
+- [x] **Update ARCH.md**: removed `ContextBuilder`, added `Chunker`, fixed component names, added GitHub/Ollama adapters
+- [x] **Clarify "ACP generates correct markdown"**: defined as valid JSON structure with non-empty summary/files (validated in tests)
 
 ### Observability
 - [ ] **Add per-step timing logs**: diff, analyze, ACP call, validation phases
@@ -97,9 +97,9 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 | `internal/retry` | 2 tests | ✅ Good |
 | `internal/usecase` | 3 tests | ⚠️ Basic |
 | `internal/validation` | 1 test | ⚠️ Minimal |
-| `internal/adapters/acp` | **0 tests** | 🔴 Missing |
-| `internal/adapters/fs` | **0 tests** | 🔴 Missing |
-| `internal/adapters/github` | **0 tests** | 🔴 Missing |
+| `internal/adapters/acp` | 9 tests | ✅ Good |
+| `internal/adapters/fs` | 15 tests | ✅ Good |
+| `internal/adapters/github` | 16 tests | ✅ Good |
 
 ---
 
@@ -107,14 +107,14 @@ Go service that watches Git repositories and auto-updates documentation via LLM 
 
 - [x] Job runs on cron schedule (default: hourly)
 - [x] Code/config changes trigger doc updates
-- [ ] ACP generates correct markdown updates *(needs definition)*
+- [x] ACP generates valid ACPResponse JSON with non-empty summary and files (validated in client)
 - [x] Only `README.md` and `/docs/**` modified
 - [x] No direct push to protected branches
 - [x] MR/PR created with clear description
 - [x] No MR when no meaningful changes
 - [x] Resilient to repeated runs and transient errors
 - [x] Critical paths covered by tests
-- [ ] **Dry-run mode actually works**
+- [x] **Dry-run mode actually works**
 
 ---
 

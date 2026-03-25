@@ -73,8 +73,10 @@ Implement domain interfaces. Each adapter is isolated in its own package.
 
 | Package | Implements | External dependency |
 |---|---|---|
-| `adapters/gitlab` | `RepositoryPort`, `MRCreatorPort` | GitLab API / go-git |
-| `adapters/acp` | `ACPClientPort` | ACP HTTP/gRPC |
+| `adapters/gitlab` | `RepositoryPort`, `MRCreatorPort` | GitLab REST API |
+| `adapters/github` | `RepositoryPort`, `MRCreatorPort` | GitHub REST API |
+| `adapters/acp` | `ACPClientPort` | ACP HTTP endpoint |
+| `adapters/ollama` | `ACPClientPort` | Ollama `/api/chat` endpoint |
 | `adapters/storage` | `StateStorePort` | SQLite |
 | `adapters/fs` | `DocumentStorePort`, `DocumentWriterPort` | os, filepath |
 
@@ -94,8 +96,8 @@ Each component has exactly one responsibility:
 
 - `ChangeAnalyzer` — classifies files and determines impact zones only
 - `DocumentMapper` — maps changes to target documents only
-- `ContextBuilder` — builds ACP context only
-- `ValidationLayer` — validates results only
+- `Chunker` — splits large diffs into context-sized chunks
+- `Validator` — validates document updates before committing
 
 Note: `RunDocUpdateUseCase` orchestrates the full scenario but **does not perform** any task itself — it delegates. This is acceptable.
 
@@ -146,7 +148,7 @@ type MRCreatorPort interface {
 }
 ```
 
-`ContextBuilder` depends only on `RepositoryPort`, not on `MRCreatorPort`.
+`DocumentMapper` depends only on the mapping config, not on the repository adapter.
 
 ---
 
